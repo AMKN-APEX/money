@@ -1,0 +1,133 @@
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+import { shortDate } from "@/lib/format";
+
+type EmailMessage = {
+  id: string;
+  received_at: string;
+  from_address: string | null;
+  subject: string | null;
+  body: string;
+  status: "unparsed" | "parsed" | "ignored" | "failed";
+  parser_id: string | null;
+  error: string | null;
+};
+
+const STATUS_LABEL: Record<EmailMessage["status"], string> = {
+  unparsed: "未解析",
+  parsed: "取引を作成済み",
+  ignored: "対象外",
+  failed: "解析できず",
+};
+
+const STATUS_CLASS: Record<EmailMessage["status"], string> = {
+  unparsed: "text-amber-400",
+  parsed: "text-emerald-400",
+  ignored: "text-slate-500",
+  failed: "text-rose-400",
+};
+
+/** 差出人から、どのカードのメールかを推測して見せる */
+function senderLabel(from: string | null): string {
+  const f = (from ?? "").toLowerCase();
+  if (f.includes("vpass") || f.includes("smbc-card")) return "三井住友カード";
+  if (f.includes("rakuten-card")) return "楽天カード";
+  if (f.includes("paypay")) return "PayPayカード";
+  if (f.includes("pocketcard") || f.includes("zozo")) return "ZOZOカード";
+  return from ?? "不明";
+}
+
+export default async function EmailsPage({ searchParams }: PageProps<"/emails">) {
+  const params = await searchParams;
+  const openId = typeof params.open === "string" ? params.open : null;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("email_messages")
+    .select("id, received_at, from_address, subject, body, status, parser_id, error")
+    .order("received_at", { ascending: false })
+    .limit(50);
+
+  if (error) {
+    return (
+      <>
+        <h1 className="text-xl font-bold">メール速報</h1>
+        <p className="mt-4 rounded-xl border border-rose-900 bg-rose-950/50 p-4 text-sm text-rose-300">
+          読み込めませんでした: {error.message}
+        </p>
+      </>
+    );
+  }
+
+  const messages = (data ?? []) as EmailMessage[];
+  const unparsed = messages.filter((m) => m.status === "unparsed").length;
+
+  return (
+    <>
+      <h1 className="text-xl font-bold">メール速報</h1>
+      <p className="mt-1 text-sm text-slate-400">
+        カード会社から届いた利用通知メール
+      </p>
+
+      {messages.length === 0 ? (
+        <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-400">
+          <p>まだ1通も届いていません。</p>
+          <ul className="mt-3 flex list-disc flex-col gap-1 pl-4 text-xs text-slate-500">
+            <li>各カードのサイトで利用通知メールが有効になっているか</li>
+            <li>Google Apps Script のトリガーが動いているか</li>
+            <li>GAS の差出人リストに、実際の差出人ドメインが入っているか</li>
+          </ul>
+        </div>
+      ) : (
+        <>
+          {unparsed > 0 && (
+            <p className="mt-4 rounded-xl border border-amber-900 bg-amber-950/40 p-4 text-sm text-amber-300">
+              未解析のメールが {unparsed} 件あります。
+              文面に合わせたパーサーができると、自動で取引になります。
+            </p>
+          )}
+
+          <ul className="mt-5 flex flex-col gap-2">
+            {messages.map((m) => {
+              const open = openId === m.id;
+              return (
+                <li
+                  key={m.id}
+                  className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60"
+                >
+                  <Link
+                    href={open ? "/emails" : `/emails?open=${m.id}`}
+                    className="block px-4 py-3"
+                  >
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="truncate text-sm font-medium">
+                        {senderLabel(m.from_address)}
+                      </span>
+                      <span className="shrink-0 text-xs text-slate-500 tabular-nums">
+                        {shortDate(m.received_at.slice(0, 10))}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 truncate text-xs text-slate-400">
+                      {m.subject ?? "(件名なし)"}
+                    </p>
+                    <p className={`mt-1 text-xs ${STATUS_CLASS[m.status]}`}>
+                      {STATUS_LABEL[m.status]}
+                      {m.parser_id && `・${m.parser_id}`}
+                      {m.error && `・${m.error}`}
+                    </p>
+                  </Link>
+
+                  {open && (
+                    <pre className="max-h-96 overflow-auto border-t border-slate-800 bg-slate-950/70 p-4 text-xs whitespace-pre-wrap text-slate-300">
+                      {m.body}
+                    </pre>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+    </>
+  );
+}

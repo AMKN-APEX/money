@@ -61,7 +61,9 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // 静的ファイル・画像・manifest・Service Worker を除く全経路
-    "/((?!_next/static|_next/image|favicon.ico|icon-|apple-icon|manifest.webmanifest|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // 静的ファイル・画像・manifest を除く全経路。
+    // api/ingest は GAS からの受信口で、ログインを持てないので除外する
+    // （共有シークレットのヘッダーでルート自身が守っている）。
+    "/((?!api/ingest|_next/static|_next/image|favicon.ico|icon-|apple-icon|manifest.webmanifest|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

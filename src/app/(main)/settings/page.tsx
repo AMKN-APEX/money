@@ -6,7 +6,7 @@ export default async function SettingsPage() {
   const user = await getUser();
   const supabase = await createClient();
 
-  const [categories, rules, pending, batches] = await Promise.all([
+  const [categories, rules, pending, batches, unparsedMail] = await Promise.all([
     supabase.from("categories").select("id", { count: "exact", head: true }),
     supabase.from("rules").select("id", { count: "exact", head: true }),
     supabase
@@ -14,6 +14,10 @@ export default async function SettingsPage() {
       .select("id", { count: "exact", head: true })
       .eq("status", "pending_review"),
     supabase.from("import_batches").select("id", { count: "exact", head: true }),
+    supabase
+      .from("email_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "unparsed"),
   ]);
 
   return (
@@ -30,6 +34,14 @@ export default async function SettingsPage() {
         <Link href="/import" className="flex items-center justify-between px-4 py-3.5 text-sm">
           <span>CSV取込</span>
           <span className="text-slate-500 tabular-nums">{batches.count ?? 0} 回 →</span>
+        </Link>
+        <Link href="/emails" className="flex items-center justify-between px-4 py-3.5 text-sm">
+          <span>メール速報</span>
+          <span
+            className={unparsedMail.count ? "text-amber-400 tabular-nums" : "text-slate-500"}
+          >
+            未解析 {unparsedMail.count ?? 0} 件 →
+          </span>
         </Link>
       </nav>
 
