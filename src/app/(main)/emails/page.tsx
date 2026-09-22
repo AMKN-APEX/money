@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { shortDate } from "@/lib/format";
+import { ignoreEmail, restoreEmail } from "./actions";
 
 type EmailMessage = {
   id: string;
@@ -23,7 +24,7 @@ const STATUS_LABEL: Record<EmailMessage["status"], string> = {
 const STATUS_CLASS: Record<EmailMessage["status"], string> = {
   unparsed: "text-amber-400",
   parsed: "text-emerald-400",
-  ignored: "text-slate-500",
+  ignored: "text-slate-600",
   failed: "text-rose-400",
 };
 
@@ -40,13 +41,23 @@ function senderLabel(from: string | null): string {
 export default async function EmailsPage({ searchParams }: PageProps<"/emails">) {
   const params = await searchParams;
   const openId = typeof params.open === "string" ? params.open : null;
+  const showIgnored = params.ignored === "1";
 
   const supabase = await createClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("email_messages")
     .select("id, received_at, from_address, subject, body, status, parser_id, error")
     .order("received_at", { ascending: false })
     .limit(50);
+  if (!showIgnored) query = query.neq("status", "ignored");
+
+  const [{ data, error }, ignoredCount] = await Promise.all([
+    query,
+    supabase
+      .from("email_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "ignored"),
+  ]);
 
   if (error) {
     return (
@@ -64,14 +75,22 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
 
   return (
     <>
-      <h1 className="text-xl font-bold">メール速報</h1>
-      <p className="mt-1 text-sm text-slate-400">
-        カード会社から届いた利用通知メール
-      </p>
+      <div className="flex items-baseline justify-between gap-3">
+        <h1 className="text-xl font-bold">メール速報</h1>
+        {(ignoredCount.count ?? 0) > 0 && (
+          <Link
+            href={showIgnored ? "/emails" : "/emails?ignored=1"}
+            className="text-xs text-slate-400"
+          >
+            {showIgnored ? "対象外を隠す" : `対象外 ${ignoredCount.count} 件を表示`}
+          </Link>
+        )}
+      </div>
+      <p className="mt-1 text-sm text-slate-400">カード会社から届いた利用通知メール</p>
 
       {messages.length === 0 ? (
         <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-400">
-          <p>まだ1通も届いていません。</p>
+          <p>表示できるメールがありません。</p>
           <ul className="mt-3 flex list-disc flex-col gap-1 pl-4 text-xs text-slate-500">
             <li>各カードのサイトで利用通知メールが有効になっているか</li>
             <li>Google Apps Script のトリガーが動いているか</li>
@@ -83,7 +102,7 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
           {unparsed > 0 && (
             <p className="mt-4 rounded-xl border border-amber-900 bg-amber-950/40 p-4 text-sm text-amber-300">
               未解析のメールが {unparsed} 件あります。
-              文面に合わせたパーサーができると、自動で取引になります。
+              利用通知でないもの（宣伝・ログイン通知など）は「対象外にする」で外せます。
             </p>
           )}
 
@@ -118,9 +137,23 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
                   </Link>
 
                   {open && (
-                    <pre className="max-h-96 overflow-auto border-t border-slate-800 bg-slate-950/70 p-4 text-xs whitespace-pre-wrap text-slate-300">
-                      {m.body}
-                    </pre>
+                    <>
+                      <pre className="max-h-96 overflow-auto border-t border-slate-800 bg-slate-950/70 p-4 text-xs whitespace-pre-wrap text-slate-300">
+                        {m.body}
+                      </pre>
+                      <form
+                        action={m.status === "ignored" ? restoreEmail : ignoreEmail}
+                        className="border-t border-slate-800 p-3"
+                      >
+                        <input type="hidden" name="id" value={m.id} />
+                        <button
+                          type="submit"
+                          className="w-full rounded-lg border border-slate-700 py-2.5 text-xs text-slate-300"
+                        >
+                          {m.status === "ignored" ? "未解析に戻す" : "対象外にする"}
+                        </button>
+                      </form>
+                    </>
                   )}
                 </li>
               );
