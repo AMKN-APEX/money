@@ -4,7 +4,7 @@
 -- 利用者は1名だが、全テーブルに user_id を持たせて RLS で隔離する。
 -- default auth.uid() があるため、アプリ側は user_id を渡さなくてよい。
 
-create extension if not exists pgcrypto;
+-- gen_random_uuid() は PostgreSQL 13 以降の組み込み。拡張は要らない。
 
 -- ---------------------------------------------------------------- enums
 
