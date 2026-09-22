@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { loadMasters } from "@/lib/queries";
-import { currentMonthRange, shortDate, yen } from "@/lib/format";
+import { loadImportReminders, loadMasters } from "@/lib/queries";
+import { currentMonthRange, shortDate, todayJst, yen } from "@/lib/format";
 import { isLiability, type Transaction } from "@/lib/types";
+import { ImportReminderBanner } from "@/components/import-reminder";
 
 const TX_COLUMNS =
   "id, date, amount, type, account_id, to_account_id, category_id, merchant, channel, memo, source, status";
@@ -17,7 +18,7 @@ export default async function DashboardPage() {
   const supabase = await createClient();
   const month = currentMonthRange();
 
-  const [monthRes, recentRes, balanceRes, pendingRes, masters] = await Promise.all([
+  const [monthRes, recentRes, balanceRes, pendingRes, masters, reminders] = await Promise.all([
     supabase.from("transactions").select(TX_COLUMNS).gte("date", month.from).lte("date", month.to),
     supabase
       .from("transactions")
@@ -31,6 +32,7 @@ export default async function DashboardPage() {
       .select("id", { count: "exact", head: true })
       .eq("status", "pending_review"),
     loadMasters(),
+    loadImportReminders(todayJst()),
   ]);
 
   const error =
@@ -131,12 +133,15 @@ export default async function DashboardPage() {
 
       {pendingCount > 0 && (
         <Link
-          href="/transactions"
+          href="/review"
           className="mt-4 block rounded-xl border border-amber-900 bg-amber-950/40 p-4 text-sm text-amber-300"
         >
-          未分類の取引が {pendingCount} 件あります
+          未分類の取引が {pendingCount} 件あります →
         </Link>
       )}
+
+      {/* 9.4: 照会可能期間を過ぎた月の明細は二度と取れない */}
+      <ImportReminderBanner reminders={reminders} />
 
       {/* 純資産 */}
       <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">

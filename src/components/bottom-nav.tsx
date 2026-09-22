@@ -7,6 +7,7 @@ const TABS = [
   { href: "/", label: "ホーム" },
   { href: "/transactions", label: "取引" },
   { href: "/accounts", label: "口座" },
+  { href: "/import", label: "取込" },
   { href: "/settings", label: "設定" },
 ] as const;
 
