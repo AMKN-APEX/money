@@ -487,6 +487,40 @@ Supabase 側で新規サインアップを OFF にし、ユーザーはダッシ
    三井住友2枚は15日締めとして投入したが、楽天 / PayPay / ZOZO は `null` のまま。
    次回請求予定額（Phase 4）の算出に必要になるので、各明細サイトで確認する。
 
+### デプロイ（2026-09-22 完了）
+
+本番: <https://money-money-6fc1.vercel.app>
+Supabase プロジェクト ref: `plueclppgaytzutmcock`
+
+GitHub の `main` に push すると Vercel が自動でビルドして反映する。
+
+**Vercel で詰まった3点。次にプロジェクトを作るときのために残す。**
+
+1. **Deployment Protection が既定で有効**
+   新規プロジェクトは「Vercel にログインした人しか見られない」状態で作られ、
+   URL を開くと `vercel.com/sso-api` に飛ばされる。アプリは自前のログインを
+   持っているので Settings > Deployment Protection > Vercel Authentication を
+   Disabled にする。
+
+2. **環境変数の Type を Secret にすると詰む**
+   `NEXT_PUBLIC_` 付きの値はビルド時にコードへ焼き込まれる性質上、そもそも
+   秘密にできない。さらに Secret で保存すると後から Config に変換できず
+   （write-only のため）、削除して作り直すしかない。**Config で登録すること。**
+
+3. **環境変数を足しただけでは反映されない**
+   `NEXT_PUBLIC_` の値はビルド時に埋め込まれるので、変数を追加・変更したら
+   必ず Redeploy する。
+
+**Vercel の Supabase 連携（Integration）は使わなくてよい。**
+連携すると `NEXT_PUBLIC_APEX_SUPABASE_URL` のような独自名の変数が自動で増えるが、
+アプリが読む名前とは違うので機能しない。連携由来の変数は稲妻アイコンが付き、
+Edit もできない。手で `NEXT_PUBLIC_SUPABASE_URL` /
+`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` を登録するのが確実。
+
+なお Supabase の新しいAPIキー体系では anon key が publishable key
+（`sb_publishable_...`）に変わっている。どちらもブラウザに露出する前提のキーで、
+RLS で守る点は同じ。`sb_secret_...` のほうは RLS を無視できるので扱いが別。
+
 ### 次にやること（Phase 1）
 
 取引の CRUD。収入・支出・振替の手入力UI、一覧、月次サマリ。

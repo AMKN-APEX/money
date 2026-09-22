@@ -2,6 +2,8 @@
 
 個人用の家計簿。iPhone のホーム画面から使う PWA。
 
+本番: <https://money-money-6fc1.vercel.app>
+
 - 設計: [docs/design.md](docs/design.md)
 - 構成: Next.js (App Router) on Vercel / Supabase (Postgres + Auth)
 
@@ -48,10 +50,24 @@ npm install
 npm run dev
 ```
 
+## Vercel へのデプロイ
+
+`main` に push すると自動で反映される。初回だけ次の3点に注意する
+（詳細は docs/design.md 10章）。
+
+- **Settings > Deployment Protection > Vercel Authentication を Disabled** にする。
+  既定では Vercel にログインした人しか開けない
+- 環境変数は **Type を Config** にする。`NEXT_PUBLIC_` の値はビルド時に
+  コードへ焼き込まれるので秘密にできず、Secret で保存すると後から変換もできない
+- 環境変数を足したら **Redeploy** する。既存ビルドには反映されない
+
+Vercel の Supabase 連携（Integration）は使わない。`NEXT_PUBLIC_APEX_SUPABASE_URL`
+のような別名の変数が増えるだけで、アプリは読まない。
+
 ## iPhone に入れる
 
-Vercel へデプロイ（`*.vercel.app` のままでよい）したあと、Safari で開いて
-**共有 > ホーム画面に追加**。全画面で起動する。
+**Safari** で上記 URL を開き、ログインしてから
+**共有 > ホーム画面に追加**。全画面で起動する。Chrome では追加できない。
 
 ## スクリプト
 
