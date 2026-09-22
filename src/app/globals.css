@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* 日本語を含むので OS 標準のUIフォントに任せる */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI",
+    "Noto Sans JP", "Segoe UI", sans-serif;
+}
+
+html {
+  color-scheme: dark;
+  /* iOS でプルして白い帯が見えないように */
+  background-color: #020617;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+}

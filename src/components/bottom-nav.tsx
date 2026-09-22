@@ -1,0 +1,37 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+const TABS = [
+  { href: "/", label: "ホーム" },
+  { href: "/accounts", label: "口座" },
+  { href: "/settings", label: "設定" },
+] as const;
+
+export function BottomNav() {
+  const pathname = usePathname();
+
+  return (
+    <nav className="sticky bottom-0 border-t border-slate-800 bg-slate-950/90 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+      <ul className="mx-auto flex max-w-2xl">
+        {TABS.map((tab) => {
+          const active = pathname === tab.href;
+          return (
+            <li key={tab.href} className="flex-1">
+              <Link
+                href={tab.href}
+                aria-current={active ? "page" : undefined}
+                className={`block py-3.5 text-center text-sm font-medium transition ${
+                  active ? "text-emerald-400" : "text-slate-500"
+                }`}
+              >
+                {tab.label}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}

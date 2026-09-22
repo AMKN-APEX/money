@@ -1,0 +1,57 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# ---- 家計簿アプリ固有 ----
+# 金融機関からダウンロードした実データ（口座番号・残高・給与額・取引先名を含む）
+# 一度コミットすると履歴から消すのが困難なため、常に除外する
+*.csv
+/data/
+/imports/
+
+# パーサーのテスト用サンプルはマスク済みのものだけを許可する
+!tests/fixtures/*.csv
+
+# 変数名の見本はコミットする（値は入れない）
+!.env.example
+
+# supabase CLI の作業ファイル
+supabase/.temp/
