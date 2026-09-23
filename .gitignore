@@ -55,3 +55,6 @@ next-env.d.ts
 
 # supabase CLI の作業ファイル
 supabase/.temp/
+
+# プロンプトを書くだけの一時ファイル
+memo.md

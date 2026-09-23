@@ -44,20 +44,26 @@ export default async function SettingsPage() {
             未解析 {unparsedMail.count ?? 0} 件 →
           </span>
         </Link>
+        <Link
+          href="/settings/categories"
+          className="flex items-center justify-between px-4 py-3.5 text-sm"
+        >
+          <span>費目</span>
+          <span className="text-slate-500 tabular-nums">{categories.count ?? 0} 件 →</span>
+        </Link>
+        <Link
+          href="/settings/rules"
+          className="flex items-center justify-between px-4 py-3.5 text-sm"
+        >
+          <span>自動分類ルール</span>
+          <span className="text-slate-500 tabular-nums">{rules.count ?? 0} 件 →</span>
+        </Link>
       </nav>
 
       <dl className="mt-5 divide-y divide-slate-800 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 text-sm">
         <div className="flex justify-between px-4 py-3">
           <dt className="text-slate-400">ログイン中</dt>
           <dd className="truncate pl-3">{user?.email}</dd>
-        </div>
-        <div className="flex justify-between px-4 py-3">
-          <dt className="text-slate-400">費目</dt>
-          <dd className="tabular-nums">{categories.count ?? 0} 件</dd>
-        </div>
-        <div className="flex justify-between px-4 py-3">
-          <dt className="text-slate-400">自動分類ルール</dt>
-          <dd className="tabular-nums">{rules.count ?? 0} 件</dd>
         </div>
       </dl>
 

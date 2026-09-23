@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { ACCOUNT_COLUMNS } from "@/lib/queries";
-import { yen } from "@/lib/format";
+import { currentMonthRange, yen } from "@/lib/format";
 import { ACCOUNT_TYPE_LABEL, isLiability, type Account } from "@/lib/types";
 
 const GROUPS = [
@@ -10,9 +10,17 @@ const GROUPS = [
 
 export default async function AccountsPage() {
   const supabase = await createClient();
-  const [accountsRes, balanceRes] = await Promise.all([
+  const month = currentMonthRange();
+  const [accountsRes, balanceRes, investRes] = await Promise.all([
     supabase.from("accounts").select(ACCOUNT_COLUMNS).order("sort_order"),
     supabase.from("account_balances").select("account_id, balance"),
+    // 方針2: NISA積立は支出ではなく振替。支出には出てこないので、
+    // 「いくら積み立てたか」は証券口座に入ってきた振替を数えて出す（3章）
+    supabase
+      .from("transactions")
+      .select("date, amount, to_account_id")
+      .eq("type", "transfer")
+      .not("to_account_id", "is", null),
   ]);
 
   const error = accountsRes.error?.message ?? balanceRes.error?.message;
@@ -35,6 +43,19 @@ export default async function AccountsPage() {
       Number(b.balance),
     ]),
   );
+
+  // 証券口座ごとの投資額。累計と今月ぶんを出す
+  const invested = new Map<string, { total: number; thisMonth: number }>();
+  for (const t of (investRes.data ?? []) as {
+    date: string;
+    amount: number;
+    to_account_id: string;
+  }[]) {
+    const current = invested.get(t.to_account_id) ?? { total: 0, thisMonth: 0 };
+    current.total += t.amount;
+    if (t.date >= month.from && t.date <= month.to) current.thisMonth += t.amount;
+    invested.set(t.to_account_id, current);
+  }
 
   return (
     <>
@@ -88,6 +109,14 @@ export default async function AccountsPage() {
                           ` → ${byId.get(a.payment_account_id)?.name ?? "?"}`}
                       </p>
                     )}
+                    {a.type === "securities" && (
+                      <p className="mt-1 text-xs text-sky-400 tabular-nums">
+                        積立 累計 {yen(invested.get(a.id)?.total ?? 0)}
+                        <span className="text-slate-500">
+                          {" / "}今月 {yen(invested.get(a.id)?.thisMonth ?? 0)}
+                        </span>
+                      </p>
+                    )}
                     {a.note && <p className="mt-1 text-xs text-slate-600">{a.note}</p>}
                   </li>
                 );
@@ -99,7 +128,8 @@ export default async function AccountsPage() {
 
       <p className="mt-6 text-xs text-slate-600">
         残高は登録済みの取引から計算しています。初期残高をまだ入れていない口座は、
-        実際の残高とずれます。
+        実際の残高とずれます。証券口座の「積立」は投資した金額の合計で、
+        評価額（時価）ではありません。
       </p>
     </>
   );
