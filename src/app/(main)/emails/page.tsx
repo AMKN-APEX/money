@@ -44,6 +44,8 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
   const params = await searchParams;
   const openId = typeof params.open === "string" ? params.open : null;
   const showIgnored = params.ignored === "1";
+  // 直前の操作の結果。解析しても画面が変わらないことがあるため必ず出す
+  const result = typeof params.result === "string" ? params.result : null;
 
   const supabase = await createClient();
   let query = supabase
@@ -97,6 +99,12 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
         )}
       </div>
       <p className="mt-1 text-sm text-slate-400">カード会社から届いた利用通知メール</p>
+
+      {result && (
+        <p className="mt-4 rounded-xl border border-sky-900 bg-sky-950/40 p-4 text-sm text-sky-200">
+          {result}
+        </p>
+      )}
 
       {/*
         解析の操作は、一覧が空でも必ず出す。
