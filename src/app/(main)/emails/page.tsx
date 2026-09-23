@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { shortDate } from "@/lib/format";
-import { ignoreEmail, parseEmails, restoreEmail, retryEmail } from "./actions";
+import { ignoreEmail, parseEmails, reparseIgnored, restoreEmail, retryEmail } from "./actions";
 
 type EmailMessage = {
   id: string;
@@ -89,9 +89,53 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
       </div>
       <p className="mt-1 text-sm text-slate-400">カード会社から届いた利用通知メール</p>
 
+      {/*
+        解析の操作は、一覧が空でも必ず出す。
+        既定で対象外を隠しているため、全部を対象外にすると一覧は0件になる。
+        「メールが無い」のではなく「隠れている」だけなのに、そこでボタンまで
+        消えると手の打ちようが無くなる。
+      */}
+      <div
+        className={`mt-4 rounded-xl border p-4 text-sm ${
+          unparsed > 0
+            ? "border-amber-900 bg-amber-950/40 text-amber-300"
+            : "border-slate-800 bg-slate-900/60 text-slate-400"
+        }`}
+      >
+        <p>
+          {unparsed > 0
+            ? `未解析のメールが ${unparsed} 件あります。受信時に自動で解析されますが、パーサーを直したあとはここからやり直せます。`
+            : "未解析のメールはありません。"}
+        </p>
+        <form action={parseEmails}>
+          <button
+            type="submit"
+            className={`mt-3 w-full rounded-lg border py-2.5 text-xs ${
+              unparsed > 0 ? "border-amber-700 text-amber-200" : "border-slate-700 text-slate-300"
+            }`}
+          >
+            いま解析する
+          </button>
+        </form>
+        {(ignoredCount.count ?? 0) > 0 && (
+          <form action={reparseIgnored}>
+            <button
+              type="submit"
+              className="mt-2 w-full rounded-lg border border-slate-700 py-2.5 text-xs text-slate-300"
+            >
+              対象外の {ignoredCount.count} 件も解析し直す
+            </button>
+          </form>
+        )}
+      </div>
+
       {messages.length === 0 ? (
-        <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-400">
-          <p>表示できるメールがありません。</p>
+        <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm text-slate-400">
+          <p>
+            {(ignoredCount.count ?? 0) > 0
+              ? "表示できるメールがありません（対象外にしたものは隠れています）。"
+              : "表示できるメールがありません。"}
+          </p>
           <ul className="mt-3 flex list-disc flex-col gap-1 pl-4 text-xs text-slate-500">
             <li>各カードのサイトで利用通知メールが有効になっているか</li>
             <li>Google Apps Script のトリガーが動いているか</li>
@@ -100,35 +144,6 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
         </div>
       ) : (
         <>
-          {/*
-            未解析が0件でもボタンは残す。必要なときに限って消えると詰むため。
-            （対象外にしたメールを「未解析に戻す」と、そのまま解析まで走る）
-          */}
-          <div
-            className={`mt-4 rounded-xl border p-4 text-sm ${
-              unparsed > 0
-                ? "border-amber-900 bg-amber-950/40 text-amber-300"
-                : "border-slate-800 bg-slate-900/60 text-slate-400"
-            }`}
-          >
-            <p>
-              {unparsed > 0
-                ? `未解析のメールが ${unparsed} 件あります。受信時に自動で解析されますが、パーサーを直したあとはここからやり直せます。`
-                : "未解析のメールはありません。解析し直したいメールは、開いて「未解析に戻す」を押してください。"}
-            </p>
-            <form action={parseEmails}>
-              <button
-                type="submit"
-                className={`mt-3 w-full rounded-lg border py-2.5 text-xs ${
-                  unparsed > 0
-                    ? "border-amber-700 text-amber-200"
-                    : "border-slate-700 text-slate-300"
-                }`}
-              >
-                いま解析する
-              </button>
-            </form>
-          </div>
 
           <ul className="mt-5 flex flex-col gap-2">
             {messages.map((m) => {

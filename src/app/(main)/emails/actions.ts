@@ -71,3 +71,20 @@ export async function retryEmail(formData: FormData) {
 
   await parseEmails();
 }
+
+/**
+ * 対象外にしたメールを全部まとめて解析し直す。
+ *
+ * パーサーが無かった頃に手で対象外にしたメールを拾い直すための操作。
+ * 安全に押せる: 利用通知でないメールは、解析がもう一度そう判断して
+ * 対象外へ戻る。すでに取引になっているメールは重複キーで弾かれる。
+ */
+export async function reparseIgnored() {
+  const supabase = await createClient();
+  await supabase
+    .from("email_messages")
+    .update({ status: "unparsed", error: null })
+    .eq("status", "ignored");
+
+  await parseEmails();
+}
