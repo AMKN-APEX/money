@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { shortDate } from "@/lib/format";
-import { ignoreEmail, restoreEmail } from "./actions";
+import { ignoreEmail, parseEmails, restoreEmail, retryEmail } from "./actions";
 
 type EmailMessage = {
   id: string;
@@ -11,6 +11,7 @@ type EmailMessage = {
   body: string;
   status: "unparsed" | "parsed" | "ignored" | "failed";
   parser_id: string | null;
+  transaction_id: string | null;
   error: string | null;
 };
 
@@ -46,7 +47,7 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
   const supabase = await createClient();
   let query = supabase
     .from("email_messages")
-    .select("id, received_at, from_address, subject, body, status, parser_id, error")
+    .select("id, received_at, from_address, subject, body, status, parser_id, transaction_id, error")
     .order("received_at", { ascending: false })
     .limit(50);
   if (!showIgnored) query = query.neq("status", "ignored");
@@ -100,10 +101,20 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
       ) : (
         <>
           {unparsed > 0 && (
-            <p className="mt-4 rounded-xl border border-amber-900 bg-amber-950/40 p-4 text-sm text-amber-300">
-              未解析のメールが {unparsed} 件あります。
-              利用通知でないもの（宣伝・ログイン通知など）は「対象外にする」で外せます。
-            </p>
+            <div className="mt-4 rounded-xl border border-amber-900 bg-amber-950/40 p-4 text-sm text-amber-300">
+              <p>
+                未解析のメールが {unparsed} 件あります。
+                受信時に自動で解析されますが、パーサーを直したあとはここからやり直せます。
+              </p>
+              <form action={parseEmails}>
+                <button
+                  type="submit"
+                  className="mt-3 w-full rounded-lg border border-amber-700 py-2.5 text-xs text-amber-200"
+                >
+                  いま解析する
+                </button>
+              </form>
+            </div>
           )}
 
           <ul className="mt-5 flex flex-col gap-2">
@@ -141,18 +152,36 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
                       <pre className="max-h-96 overflow-auto border-t border-slate-800 bg-slate-950/70 p-4 text-xs whitespace-pre-wrap text-slate-300">
                         {m.body}
                       </pre>
-                      <form
-                        action={m.status === "ignored" ? restoreEmail : ignoreEmail}
-                        className="border-t border-slate-800 p-3"
-                      >
-                        <input type="hidden" name="id" value={m.id} />
-                        <button
-                          type="submit"
-                          className="w-full rounded-lg border border-slate-700 py-2.5 text-xs text-slate-300"
-                        >
-                          {m.status === "ignored" ? "未解析に戻す" : "対象外にする"}
-                        </button>
-                      </form>
+                      <div className="flex flex-col gap-2 border-t border-slate-800 p-3">
+                        {m.status === "parsed" && m.transaction_id && (
+                          <Link
+                            href={`/transactions/${m.transaction_id}`}
+                            className="rounded-lg border border-emerald-800 py-2.5 text-center text-xs text-emerald-300"
+                          >
+                            作成された取引を開く
+                          </Link>
+                        )}
+                        {m.status === "failed" && (
+                          <form action={retryEmail}>
+                            <input type="hidden" name="id" value={m.id} />
+                            <button
+                              type="submit"
+                              className="w-full rounded-lg border border-slate-700 py-2.5 text-xs text-slate-300"
+                            >
+                              もう一度解析する
+                            </button>
+                          </form>
+                        )}
+                        <form action={m.status === "ignored" ? restoreEmail : ignoreEmail}>
+                          <input type="hidden" name="id" value={m.id} />
+                          <button
+                            type="submit"
+                            className="w-full rounded-lg border border-slate-700 py-2.5 text-xs text-slate-300"
+                          >
+                            {m.status === "ignored" ? "未解析に戻す" : "対象外にする"}
+                          </button>
+                        </form>
+                      </div>
                     </>
                   )}
                 </li>

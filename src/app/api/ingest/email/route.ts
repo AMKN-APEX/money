@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { timingSafeEqual } from "node:crypto";
+import { applyEmailParsers, type EmailApplyResult } from "@/lib/email-apply";
 
 /**
  * Gmail から転送されたカード利用通知メールの受け口。
@@ -8,7 +9,9 @@ import { timingSafeEqual } from "node:crypto";
  *
  * GAS はログイン状態を持てないため、RLS を通せない。ここだけ Supabase の
  * secret key を使い、共有シークレットのヘッダーで入口を守る。
- * 解析はここではやらない。まず保存だけして、パーサーは後から適用する。
+ *
+ * 保存と解析は分けてある。まず生のまま保存し、そのあとパーサーを当てる。
+ * 解析に失敗してもメールは残るので、パーサーを直してからやり直せる。
  */
 
 export const runtime = "nodejs";
@@ -122,10 +125,21 @@ export async function POST(request: Request) {
   }
 
   const inserted = data?.length ?? 0;
+
+  // 保存できたら、そのまま解析まで進める。
+  // 解析で落ちても受信そのものは成功しているので、GAS にはラベルを付けさせる。
+  let parsed: EmailApplyResult | { error: string };
+  try {
+    parsed = await applyEmailParsers(supabase, userId);
+  } catch (e) {
+    parsed = { error: e instanceof Error ? e.message : String(e) };
+  }
+
   return NextResponse.json({
     received: incoming.length,
     inserted,
     duplicates: rows.length - inserted,
     rejected,
+    parsed,
   });
 }
