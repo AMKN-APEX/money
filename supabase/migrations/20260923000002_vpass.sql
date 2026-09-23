@@ -1,5 +1,9 @@
 -- Vpass（三井住友カード）のCSV取込に必要な変更
 -- 設計: docs/design.md 9.10 / 13章。実ファイルで確認済み（2026-09-23）
+--
+-- **20260922000006_statement_window.sql を先に実行しておくこと。**
+-- 何度実行しても同じ結果になるよう書いてある（途中で失敗しても、直してそのまま
+-- 流し直せる）。適用済みかどうかは supabase/check-migrations.sql で確かめられる。
 
 -- ---------------------------------------------------------------- カードの特定
 -- 1口座に複数の呼び名が要るようになったため、配列にする。
@@ -8,21 +12,34 @@
 -- iD は独立した資金源ではない（方針1）。同じ請求にまとめられていることを
 -- 実ファイルの合計行で確認した（デビュープラス 103,632 + iD 6,412 = 110,044）。
 -- 別口座にすると同じ支出が2件に見えるので、デビュープラスに寄せる。
-alter table accounts add column card_patterns text[] not null default '{}';
+alter table accounts add column if not exists card_patterns text[] not null default '{}';
 
 comment on column accounts.card_patterns is
   '利用通知メール・CSVに現れるカード名の部分一致パターン（normalizeMerchant 済みの形）。空なら未確認';
 
-update accounts set card_patterns = array[email_card_pattern]
- where email_card_pattern is not null;
-
-alter table accounts drop column email_card_pattern;
+-- 旧列からの引き継ぎ。すでに消えていれば何もしない
+do $migrate_pattern$
+begin
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'accounts'
+       and column_name = 'email_card_pattern'
+  ) then
+    execute $sql$
+      update accounts set card_patterns = array[email_card_pattern]
+       where email_card_pattern is not null and card_patterns = '{}'
+    $sql$;
+    execute 'alter table accounts drop column email_card_pattern';
+  end if;
+end;
+$migrate_pattern$;
 
 -- ------------------------------------------------ 1ファイルに複数カードが入る
 -- 同一ファイルから口座ごとに取込履歴を作るため、ファイルの一意性を口座単位にする。
 -- 「このファイルは取込済みか」の判定は口座を問わず行うので、二重計上は起きない。
+--
 -- 制約名は作成時に自動で付いたもので、列名を変えても追随しない。名前で決め打ちせず引く
-do $drop_unique$
+do $swap_unique$
 declare cname text;
 begin
   select conname into cname
@@ -35,11 +52,17 @@ begin
   if cname is not null then
     execute format('alter table import_batches drop constraint %I', cname);
   end if;
-end;
-$drop_unique$;
 
-alter table import_batches add constraint import_batches_user_account_file_key
-  unique (user_id, account_id, file_hash);
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'import_batches'::regclass
+       and conname = 'import_batches_user_account_file_key'
+  ) then
+    alter table import_batches add constraint import_batches_user_account_file_key
+      unique (user_id, account_id, file_hash);
+  end if;
+end;
+$swap_unique$;
 
 do $vpass$
 declare
@@ -50,6 +73,15 @@ begin
   select id into uid from auth.users order by created_at limit 1;
   if uid is null then
     raise exception '先に Supabase Auth でユーザーを作成してください';
+  end if;
+
+  -- 9.4 の遡及月数を持つ列。無いまま進むと、このマイグレーションが途中で落ちる
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'accounts'
+       and column_name = 'statement_months_back'
+  ) then
+    raise exception '先に 20260922000006_statement_window.sql を実行してください';
   end if;
 
   select id into debut  from accounts where user_id = uid and name = '三井住友デビュープラス';
