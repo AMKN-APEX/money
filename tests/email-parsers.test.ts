@@ -45,7 +45,7 @@ test("差出人からパーサーを選ぶ", () => {
 
 // ---------------------------------------------------------------- 三井住友カード
 
-test("三井住友: 全角とNBSP混じりの本文から利用1件を読む", () => {
+test("三井住友: 項目名が付いたプレーンテキスト版を読む（実物の形）", () => {
   const r = smbcEmailParser.parse(fixture("smbc-usage.txt"));
 
   assert.equal(r.kind, "usage");
@@ -54,12 +54,35 @@ test("三井住友: 全角とNBSP混じりの本文から利用1件を読む", (
 
   const u = r.usages[0];
   assert.equal(u.date, "2026-09-23");
-  assert.equal(u.time, "16:54");
-  assert.equal(u.amount, 4950);
-  // 全角は NFKC で畳み、行末の利用区分（買物）は落とす
-  assert.equal(u.merchant, "ユニクロ・GU・PLSTオンライン");
+  assert.equal(u.time, "12:50");
+  assert.equal(u.amount, 2200);
+  // 全角は NFKC で畳む（／ → /）
+  assert.equal(u.merchant, "サンプルストア/NFC");
+  // 利用取引が「買物」なら注記しない
   assert.equal(u.memo, null);
   assert.equal(u.needsReview, false);
+});
+
+test("三井住友: 項目名が無いHTML由来の本文も読める（保険）", () => {
+  const r = smbcEmailParser.parse(fixture("smbc-usage-html.txt"));
+
+  assert.equal(r.kind, "usage");
+  assert.equal(r.cardLabel, "三井住友カードデビュープラスVISA");
+
+  const u = r.usages[0];
+  assert.equal(u.date, "2026-09-23");
+  assert.equal(u.time, "16:54");
+  assert.equal(u.amount, 4950);
+  // 行末の利用区分（買物）は切り離す
+  assert.equal(u.merchant, "ユニクロ・GU・PLSTオンライン");
+});
+
+test("三井住友: キャッシングは自動確定させない", () => {
+  const body = fixture("smbc-usage.txt").replace("◇利用取引：買物", "◇利用取引：キャッシング");
+  const u = smbcEmailParser.parse(body).usages[0];
+
+  assert.equal(u.needsReview, true);
+  assert.equal(u.memo, "利用区分: キャッシング");
 });
 
 test("三井住友: 本文のカード名がシード済みのパターンに当たる", () => {
@@ -82,12 +105,15 @@ test("三井住友: 利用通知でないメールは取り込まない", () => 
   assert.equal(r.usages.length, 0);
 });
 
-test("三井住友: 日時はあるのに金額が無ければ失敗として残す", () => {
-  const broken = "ご利用日時：2026/09/23 16:54\nご利用内容の表示は Vpass アプリでご確認ください";
+test("三井住友: 利用日はあるのに金額が無ければ、該当箇所を添えて失敗させる", () => {
+  const broken = `◇利用日：2026/09/23 16:54
+内容は Vpass アプリでご確認ください`;
   const r = smbcEmailParser.parse(broken);
 
   assert.equal(r.kind, "error");
   assert.match(r.error ?? "", /読み取れませんでした/);
+  // 本文を見に行かずに直せるよう、読めなかった箇所を含める
+  assert.match(r.error ?? "", /Vpass/);
 });
 
 // ---------------------------------------------------------------- ポケットカード
