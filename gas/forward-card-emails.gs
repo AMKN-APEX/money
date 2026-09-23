@@ -15,17 +15,27 @@
  *      実行する関数: forwardCardEmails
  *      イベントのソース: 時間主導型 / 分ベースのタイマー / 10分おき
  *
- * ── 仕組み ────────────────────────────────────────────────────
- * 送信済みのメールには Gmail のラベルを付けて二度送らないようにする。
- * サーバー側も Gmail のメッセージIDで重複を弾くので、二重計上はしない。
- * 解析はサーバーで後から行う。ここでは中身を見ずにそのまま送る。
+ * ※ プロジェクト名は自由に変えてよい。ただの表示名で、動作には影響しない。
+ *
+ * ── 重複をどう防ぐか（2026-09-23 に作り直した） ────────────────
+ * **ラベルで送信済みを管理してはいけない。Gmail のラベルはスレッド単位だから。**
+ *
+ * カードの利用通知は毎回まったく同じ件名で届くため、Gmail がそれらを
+ * ひとつのスレッドにまとめる。スレッドにラベルを付ける方式だと、
+ *   1通目を送る → スレッドにラベルが付く → 以降の新着は同じスレッドに入る
+ *   → `-label:` で除外され、**二度と送られない**
+ * という蓋がされる。実際、9/22 の1通で蓋がされ、9/23 の利用通知が
+ * 1通も届かなくなっていた。
+ *
+ * そこでラベルはやめ、**直近 LOOKBACK_DAYS 日ぶんを毎回まるごと送る**。
+ * サーバーは Gmail のメッセージIDで重複を弾く（email_messages の
+ * unique(user_id, gmail_id)）ので、何度送っても増えない。
+ * 「送りすぎても無害、送り漏らすと致命的」なので、重い側に倒してある。
  */
-
-var LABEL_NAME = 'money-sent';
 
 /**
  * 対象の差出人。届かないカードがあればここに足す。
- * アプリの「メール」画面で、何が届いて何が届いていないか確認できる。
+ * アプリの「メール速報」画面で、何が届いて何が届いていないか確認できる。
  */
 var SENDERS = [
   'vpass.ne.jp',          // 三井住友カード（Amazonカード / デビュープラス）
@@ -34,14 +44,34 @@ var SENDERS = [
   'mail.rakuten-card.co.jp',
   'paypay-card.co.jp',    // PayPayカード
   'paypay-corp.co.jp',
-  'pocketcard.co.jp',     // ポケットカード（ZOZOカード）
+  'pocketcard.co.jp',     // ポケットカード（ZOZOカード）※ pinf.pocketcard.co.jp も含む
   'zozo.jp'
 ];
 
-/** 一度に送る通数。GAS の実行時間制限に収める */
-var BATCH_SIZE = 25;
+/** 毎回さかのぼる日数。トリガーが数日止まっても取りこぼさない長さにする */
+var LOOKBACK_DAYS = 7;
 
+/** 1回のPOSTで送る通数。サーバー側の上限は50 */
+var CHUNK = 40;
+
+/** 検索するスレッド数の上限 */
+var MAX_THREADS = 200;
+
+/** 10分おきのトリガーから呼ぶ */
 function forwardCardEmails() {
+  forwardSince(LOOKBACK_DAYS);
+}
+
+/**
+ * 過去30日ぶんをまとめて送り直す。
+ * パーサーを直したあとや、取りこぼしに気づいたときに手で実行する。
+ * サーバーが重複を弾くので、何度実行しても取引は増えない。
+ */
+function backfillCardEmails() {
+  forwardSince(30);
+}
+
+function forwardSince(days) {
   var props = PropertiesService.getScriptProperties();
   var endpoint = props.getProperty('ENDPOINT');
   var secret = props.getProperty('INGEST_SECRET');
@@ -50,26 +80,25 @@ function forwardCardEmails() {
     throw new Error('スクリプト プロパティに ENDPOINT と INGEST_SECRET を設定してください');
   }
 
-  var label = GmailApp.getUserLabelByName(LABEL_NAME) || GmailApp.createLabel(LABEL_NAME);
-
   var from = SENDERS.map(function (d) { return 'from:' + d; }).join(' OR ');
-  // 取りこぼしても翌月まで拾えるように、少し広めに遡る
-  var query = 'newer_than:30d -label:' + LABEL_NAME + ' (' + from + ')';
+  var query = 'newer_than:' + days + 'd (' + from + ')';
 
-  var threads = GmailApp.search(query, 0, BATCH_SIZE);
+  var threads = GmailApp.search(query, 0, MAX_THREADS);
   if (threads.length === 0) {
-    Logger.log('送るメールはありません');
+    Logger.log('対象のメールはありません');
     return;
   }
 
-  var messages = [];
-  var sentThreads = [];
+  // スレッド検索なので、窓の外の古いメッセージも一緒に付いてくる。日時で切る
+  var cutoff = new Date().getTime() - days * 24 * 60 * 60 * 1000;
 
+  var messages = [];
   for (var i = 0; i < threads.length; i++) {
-    var thread = threads[i];
-    var msgs = thread.getMessages();
+    var msgs = threads[i].getMessages();
     for (var j = 0; j < msgs.length; j++) {
       var m = msgs[j];
+      if (m.getDate().getTime() < cutoff) continue;
+
       messages.push({
         gmailId: m.getId(),
         receivedAt: m.getDate().toISOString(),
@@ -79,43 +108,52 @@ function forwardCardEmails() {
         body: m.getPlainBody()
       });
     }
-    sentThreads.push(thread);
   }
 
-  var response = UrlFetchApp.fetch(endpoint, {
-    method: 'post',
-    contentType: 'application/json',
-    headers: { 'x-ingest-secret': secret },
-    payload: JSON.stringify({ messages: messages }),
-    muteHttpExceptions: true
-  });
-
-  var code = response.getResponseCode();
-  if (code !== 200) {
-    // ラベルを付けずに終わるので、次回の実行でやり直される
-    throw new Error('送信に失敗しました: ' + code + ' ' + response.getContentText());
+  if (messages.length === 0) {
+    Logger.log('対象のメールはありません');
+    return;
   }
 
-  // 送れたぶんだけラベルを付ける
-  for (var k = 0; k < sentThreads.length; k++) {
-    sentThreads[k].addLabel(label);
+  var sent = 0;
+  for (var k = 0; k < messages.length; k += CHUNK) {
+    var chunk = messages.slice(k, k + CHUNK);
+    var response = UrlFetchApp.fetch(endpoint, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'x-ingest-secret': secret },
+      payload: JSON.stringify({ messages: chunk }),
+      muteHttpExceptions: true
+    });
+
+    var code = response.getResponseCode();
+    if (code !== 200) {
+      // 次回の実行でやり直される（送信済みの記録を持たないため、取りこぼさない）
+      throw new Error('送信に失敗しました: ' + code + ' ' + response.getContentText());
+    }
+
+    sent += chunk.length;
+    Logger.log(chunk.length + ' 通送信: ' + response.getContentText());
   }
 
-  Logger.log(messages.length + ' 通送信: ' + response.getContentText());
+  Logger.log('合計 ' + sent + ' 通を送信しました（' + days + '日ぶん）');
 }
 
 /**
- * 送信済みラベルを外して最初からやり直す。
- * パーサーを直したあとに、過去のメールを解析し直したいときに使う。
- * （サーバー側は Gmail のメッセージIDで重複を弾くので、送り直しても増えない）
+ * 旧版が付けていた money-sent ラベルを外して消す。
+ * 新しい方式では使わない。1回だけ実行すればよい。
  */
-function resetSentLabel() {
-  var label = GmailApp.getUserLabelByName(LABEL_NAME);
-  if (!label) return;
+function removeLegacySentLabel() {
+  var label = GmailApp.getUserLabelByName('money-sent');
+  if (!label) {
+    Logger.log('money-sent ラベルはありません');
+    return;
+  }
 
   var threads = label.getThreads();
   for (var i = 0; i < threads.length; i++) {
     threads[i].removeLabel(label);
   }
-  Logger.log(threads.length + ' 件のラベルを外しました');
+  label.deleteLabel();
+  Logger.log(threads.length + ' 件からラベルを外して削除しました');
 }
