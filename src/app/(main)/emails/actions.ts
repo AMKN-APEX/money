@@ -21,15 +21,23 @@ export async function ignoreEmail(formData: FormData) {
   revalidatePath("/settings");
 }
 
-/** 対象外にしたものを未解析に戻す */
+/**
+ * 対象外にしたものを未解析に戻し、そのまま解析まで走らせる。
+ *
+ * 戻すのは「もう一度解析させたい」ときなので、解析しないと押した意味がない。
+ * 利用通知でないメールなら、解析がもう一度そう判断して対象外に戻る。
+ */
 export async function restoreEmail(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
 
   const supabase = await createClient();
-  await supabase.from("email_messages").update({ status: "unparsed" }).eq("id", id);
+  await supabase
+    .from("email_messages")
+    .update({ status: "unparsed", error: null })
+    .eq("id", id);
 
-  revalidatePath("/emails");
+  await parseEmails();
   revalidatePath("/settings");
 }
 

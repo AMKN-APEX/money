@@ -100,22 +100,35 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
         </div>
       ) : (
         <>
-          {unparsed > 0 && (
-            <div className="mt-4 rounded-xl border border-amber-900 bg-amber-950/40 p-4 text-sm text-amber-300">
-              <p>
-                未解析のメールが {unparsed} 件あります。
-                受信時に自動で解析されますが、パーサーを直したあとはここからやり直せます。
-              </p>
-              <form action={parseEmails}>
-                <button
-                  type="submit"
-                  className="mt-3 w-full rounded-lg border border-amber-700 py-2.5 text-xs text-amber-200"
-                >
-                  いま解析する
-                </button>
-              </form>
-            </div>
-          )}
+          {/*
+            未解析が0件でもボタンは残す。必要なときに限って消えると詰むため。
+            （対象外にしたメールを「未解析に戻す」と、そのまま解析まで走る）
+          */}
+          <div
+            className={`mt-4 rounded-xl border p-4 text-sm ${
+              unparsed > 0
+                ? "border-amber-900 bg-amber-950/40 text-amber-300"
+                : "border-slate-800 bg-slate-900/60 text-slate-400"
+            }`}
+          >
+            <p>
+              {unparsed > 0
+                ? `未解析のメールが ${unparsed} 件あります。受信時に自動で解析されますが、パーサーを直したあとはここからやり直せます。`
+                : "未解析のメールはありません。解析し直したいメールは、開いて「未解析に戻す」を押してください。"}
+            </p>
+            <form action={parseEmails}>
+              <button
+                type="submit"
+                className={`mt-3 w-full rounded-lg border py-2.5 text-xs ${
+                  unparsed > 0
+                    ? "border-amber-700 text-amber-200"
+                    : "border-slate-700 text-slate-300"
+                }`}
+              >
+                いま解析する
+              </button>
+            </form>
+          </div>
 
           <ul className="mt-5 flex flex-col gap-2">
             {messages.map((m) => {
