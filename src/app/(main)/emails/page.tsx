@@ -74,6 +74,14 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
   const messages = (data ?? []) as EmailMessage[];
   const unparsed = messages.filter((m) => m.status === "unparsed").length;
 
+  /**
+   * 開閉のリンクは、対象外の表示状態を引き継がせる。
+   * 引き継がないと、対象外のメールをタップした瞬間にフィルタが外れて
+   * 一覧から消え、そのメールだけ永久に開けなくなる。
+   */
+  const listHref = showIgnored ? "/emails?ignored=1" : "/emails";
+  const openHref = (id: string) => `${listHref}${showIgnored ? "&" : "?"}open=${id}`;
+
   return (
     <>
       <div className="flex items-baseline justify-between gap-3">
@@ -154,7 +162,7 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
                   className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60"
                 >
                   <Link
-                    href={open ? "/emails" : `/emails?open=${m.id}`}
+                    href={open ? listHref : openHref(m.id)}
                     className="block px-4 py-3"
                   >
                     <div className="flex items-baseline justify-between gap-3">

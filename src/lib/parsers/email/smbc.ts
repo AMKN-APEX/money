@@ -23,7 +23,11 @@ import type { EmailParseResult, EmailParser, ParsedUsage } from "./types";
 
 /** 「〜についてカードの利用内容をお知らせします」からカード名を取る */
 const CARD_LINE = /^(.+?)について、?カードの(?:ご)?利用内容/;
-const USAGE_AT = /^ご利用日時/;
+/**
+ * 行頭に固定しない。HTMLメールをテキストに落とす過程で、
+ * 見出しと値が1行にまとまったり、前に別の語がくっついたりするため。
+ */
+const USAGE_AT = /ご利用日時/;
 /** 利用先と金額は同じ行に空白区切りで並ぶ */
 const MERCHANT_AND_AMOUNT = /^(.+?)[\s　]+([0-9][0-9,]*)\s*円$/;
 const AMOUNT_ONLY = /^([0-9][0-9,]*)\s*円$/;
@@ -57,11 +61,18 @@ export const smbcEmailParser: EmailParser = {
     }
 
     if (usages.length === 0) {
+      // 何をどう読み損ねたのか、直すのに要る情報を画面に出す。
+      // 文面を見に行かなくても、受信箱の表示だけで原因が分かるようにする。
+      const around = lines
+        .slice(starts[0], starts[0] + 6)
+        .filter((line) => line !== "")
+        .join(" ⏎ ")
+        .slice(0, 160);
       return {
         kind: "error",
         cardLabel,
         usages: [],
-        error: "ご利用日時はあるのに、利用先と金額を読み取れませんでした（文面が変わった可能性）",
+        error: `ご利用日時はあるのに、利用先と金額を読み取れませんでした。該当箇所: ${around}`,
       };
     }
 
