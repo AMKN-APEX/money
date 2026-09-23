@@ -7,6 +7,11 @@ import { pocketcardEmailParser } from "../src/lib/parsers/email/pocketcard";
 import { splitUsageKind, toDateTime, toYen } from "../src/lib/parsers/email/text";
 import { normalizeMerchant } from "../src/lib/normalize";
 import { classify, type Rule } from "../src/lib/rules";
+import {
+  findEmailMatch,
+  keepsClassification,
+  type EmailTransaction,
+} from "../src/lib/merge-email";
 
 const fixture = (name: string) => readFileSync(`tests/fixtures/${name}`, "utf8");
 
@@ -184,4 +189,88 @@ test("同じメールを2回解析しても重複キーは変わらない", () =
     smbcEmailParser.parse(body).usages[0].dedupSeed,
     smbcEmailParser.parse(body).usages[0].dedupSeed,
   );
+});
+
+// ------------------------------------------------- メール速報とCSVの重複排除
+
+const emailTx = (o: Partial<EmailTransaction> & { id: string }): EmailTransaction => ({
+  date: "2026-09-23",
+  amount: 9980,
+  merchant_normalized: "ユニクロ",
+  category_id: null,
+  status: "pending_review",
+  memo: null,
+  ...o,
+});
+
+test("重複排除: 日付がずれていても金額と店名が合えば同じ取引とみなす", () => {
+  // 速報は売上データの到着時に配信されるので、利用日とずれる
+  const d = findEmailMatch(
+    { date: "2026-09-25", amount: 9980, matchText: "ユニクロ・GU・PLSTオンライン" },
+    [emailTx({ id: "a" })],
+  );
+
+  assert.equal(d.kind, "merge");
+  assert.equal(d.kind === "merge" && d.target.id, "a");
+});
+
+test("重複排除: 4日以上離れていたら別の取引", () => {
+  const d = findEmailMatch(
+    { date: "2026-09-28", amount: 9980, matchText: "ユニクロ" },
+    [emailTx({ id: "a" })],
+  );
+  assert.equal(d.kind, "insert");
+});
+
+test("重複排除: 金額が違えば別の取引", () => {
+  const d = findEmailMatch(
+    { date: "2026-09-23", amount: 9981, matchText: "ユニクロ" },
+    [emailTx({ id: "a" })],
+  );
+  assert.equal(d.kind, "insert");
+});
+
+test("重複排除: 金額と日付が同じでも、店名が明らかに違えば別の取引", () => {
+  const d = findEmailMatch(
+    { date: "2026-09-23", amount: 9980, matchText: "ローソン" },
+    [emailTx({ id: "a", merchant_normalized: "セブンイレブン" })],
+  );
+  assert.equal(d.kind, "insert");
+});
+
+test("重複排除: 店名が出ないカードは金額と日付だけで判断する", () => {
+  // ポケットカードは「ポケットカード加盟店」しか出さない（13章）
+  const d = findEmailMatch(
+    { date: "2026-09-23", amount: 6525, matchText: "ZOZOTOWN" },
+    [emailTx({ id: "a", amount: 6525, merchant_normalized: "ポケツトカード加盟店" })],
+  );
+  assert.equal(d.kind, "merge");
+});
+
+test("重複排除: 店名で絞れないまま候補が複数なら、取り違えずに人へ渡す", () => {
+  const candidates = [
+    emailTx({ id: "a", amount: 6525, merchant_normalized: "ポケツトカード加盟店" }),
+    emailTx({ id: "b", amount: 6525, merchant_normalized: "VISA加盟店", date: "2026-09-22" }),
+  ];
+  const d = findEmailMatch({ date: "2026-09-23", amount: 6525, matchText: "" }, candidates);
+
+  assert.equal(d.kind, "ambiguous");
+  assert.equal(d.kind === "ambiguous" && d.candidates.length, 2);
+});
+
+test("重複排除: 同じ速報を2件のCSV行に当てない", () => {
+  const used = new Set(["a"]);
+  const d = findEmailMatch(
+    { date: "2026-09-23", amount: 9980, matchText: "ユニクロ" },
+    [emailTx({ id: "a" })],
+    used,
+  );
+  assert.equal(d.kind, "insert");
+});
+
+test("重複排除: 人が決めた費目は上書きしない", () => {
+  assert.equal(keepsClassification(emailTx({ id: "a", status: "confirmed", category_id: "c1" })), true);
+  // まだ分類されていないものはCSV側の分類でよい
+  assert.equal(keepsClassification(emailTx({ id: "a", status: "pending_review", category_id: null })), false);
+  assert.equal(keepsClassification(emailTx({ id: "a", status: "confirmed", category_id: null })), false);
 });

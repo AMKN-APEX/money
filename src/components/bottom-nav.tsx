@@ -3,9 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+/**
+ * メール速報は毎日動くのに設定の奥に埋まっていて、開くまでの手数が多かった。
+ * 6つ並ぶので文字は小さめにする。
+ */
 const TABS = [
   { href: "/", label: "ホーム" },
   { href: "/transactions", label: "取引" },
+  { href: "/emails", label: "メール" },
   { href: "/accounts", label: "口座" },
   { href: "/import", label: "取込" },
   { href: "/settings", label: "設定" },
@@ -25,7 +30,7 @@ export function BottomNav() {
               <Link
                 href={tab.href}
                 aria-current={active ? "page" : undefined}
-                className={`block py-3.5 text-center text-sm font-medium transition ${
+                className={`block py-3.5 text-center text-xs font-medium transition ${
                   active ? "text-emerald-400" : "text-slate-500"
                 }`}
               >

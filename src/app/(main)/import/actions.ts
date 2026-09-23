@@ -4,6 +4,11 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeMerchant } from "@/lib/normalize";
 import { classify, type Rule } from "@/lib/rules";
+import {
+  findEmailMatch,
+  keepsClassification,
+  type EmailTransaction,
+} from "@/lib/merge-email";
 import { kyotoParser } from "@/lib/parsers/kyoto";
 import { yuchoParser } from "@/lib/parsers/yucho";
 import { lastKnownBalance, verifyBalanceChain, type ChainIssue } from "@/lib/parsers/balance-chain";
@@ -17,6 +22,8 @@ export type ImportSummary = {
   accountName: string;
   parsed: number;
   inserted: number;
+  /** メール速報の行を上書きした件数（3章の重複排除） */
+  merged: number;
   skipped: number;
   pendingReview: number;
   periodFrom: string | null;
@@ -123,9 +130,22 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
     if (r.source_ref) seenRefs.add(r.source_ref);
   }
 
+  // 3章: 同じ取引がメール速報とCSVの両方から入る。CSVを正として上書きする。
+  // 速報は売上データの到着時に配信されるため日付がずれる。前後3日を見る。
+  const { data: emailRows } = await supabase
+    .from("transactions")
+    .select("id, date, amount, merchant_normalized, category_id, status, memo")
+    .eq("account_id", accountId)
+    .eq("source", "email")
+    .gte("date", shiftDay(parsed.periodFrom ?? "1900-01-01", -3))
+    .lte("date", shiftDay(parsed.periodTo ?? "2999-12-31", 3));
+  const emailCandidates = (emailRows ?? []) as EmailTransaction[];
+
   let skipped = 0;
   let pendingReview = 0;
   const pending: Record<string, unknown>[] = [];
+  const merges: { id: string; patch: Record<string, unknown> }[] = [];
+  const mergedIds = new Set<string>();
 
   for (const row of parsed.rows) {
     const dedupKey = `${accountId}:${row.dedupSeed}`;
@@ -151,6 +171,53 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
       status = "pending_review";
       memo = memo ?? "振替の可能性あり（相手口座を特定できませんでした）";
     }
+    const decision = findEmailMatch(
+      { date: row.date, amount: row.amount, matchText: row.matchText },
+      emailCandidates,
+      mergedIds,
+    );
+
+    if (decision.kind === "ambiguous") {
+      warnings.push(
+        `${row.date} の ${row.amount.toLocaleString("ja-JP")}円 は、メール速報の候補が ` +
+          `${decision.candidates.length} 件あり、どれと同じ取引か決められませんでした。` +
+          "別の取引として追加したので、重複していれば片方を削除してください。",
+      );
+    }
+
+    if (decision.kind === "merge") {
+      const target = decision.target;
+      mergedIds.add(target.id);
+
+      // 人が未分類トレイで決めた費目や、ルールで確定した費目は壊さない
+      const keep = keepsClassification(target);
+      if (!keep && status === "pending_review") pendingReview++;
+
+      merges.push({
+        id: target.id,
+        patch: {
+          date: row.date,
+          merchant: row.merchant || null,
+          merchant_normalized: normalizeMerchant(row.matchText) || null,
+          source: "csv",
+          source_ref: row.sourceRef,
+          dedup_key: dedupKey,
+          balance_after: row.balanceAfter,
+          ...(keep
+            ? {}
+            : {
+                type,
+                to_account_id: toAccountId,
+                category_id: cls.category_id,
+                channel: cls.channel,
+                status,
+              }),
+          memo: target.memo ?? memo,
+        },
+      });
+      continue;
+    }
+
     if (status === "pending_review") pendingReview++;
 
     pending.push({
@@ -180,7 +247,7 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
       file_hash: fileHash,
       period_from: parsed.periodFrom,
       period_to: parsed.periodTo,
-      row_count: pending.length,
+      row_count: pending.length + merges.length,
       dup_count: skipped,
     })
     .select("id")
@@ -194,6 +261,18 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
       // 取引が入らなかったのに履歴だけ残ると、次回この file_hash で弾かれてしまう
       await supabase.from("import_batches").delete().eq("id", batch.id);
       return fail(`取り込めませんでした: ${insertError.message}`);
+    }
+  }
+
+  // メール速報の行をCSVの内容で置き換える。email_message_id は残すので、
+  // どのメールから始まった取引かは後からも辿れる
+  for (const m of merges) {
+    const { error: mergeError } = await supabase
+      .from("transactions")
+      .update({ ...m.patch, import_batch_id: batch.id })
+      .eq("id", m.id);
+    if (mergeError) {
+      warnings.push(`メール速報の行を更新できませんでした: ${mergeError.message}`);
     }
   }
 
@@ -211,6 +290,7 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
       accountName: account.name,
       parsed: parsed.rows.length,
       inserted: pending.length,
+      merged: merges.length,
       skipped,
       pendingReview,
       periodFrom: parsed.periodFrom,

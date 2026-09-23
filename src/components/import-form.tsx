@@ -226,10 +226,17 @@ function Summary({ summary }: { summary: NonNullable<ImportState["summary"]> }) 
       <p className="font-semibold text-emerald-300">
         {summary.accountName} に取り込みました
       </p>
-      <dl className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+      <dl className="mt-3 grid grid-cols-4 gap-2 text-center text-xs">
         <div className="rounded-lg bg-slate-950/50 p-2">
           <dt className="text-slate-500">追加</dt>
           <dd className="mt-0.5 text-base font-semibold tabular-nums">{summary.inserted}</dd>
+        </div>
+        {/* 3章: メール速報で先に入っていた行を、CSVの確定値で置き換えた件数 */}
+        <div className="rounded-lg bg-slate-950/50 p-2">
+          <dt className="text-slate-500">速報を上書き</dt>
+          <dd className="mt-0.5 text-base font-semibold tabular-nums text-sky-400">
+            {summary.merged}
+          </dd>
         </div>
         <div className="rounded-lg bg-slate-950/50 p-2">
           <dt className="text-slate-500">重複で除外</dt>

@@ -18,7 +18,7 @@ export default async function DashboardPage() {
   const supabase = await createClient();
   const month = currentMonthRange();
 
-  const [monthRes, recentRes, balanceRes, pendingRes, masters, reminders] = await Promise.all([
+  const [monthRes, recentRes, balanceRes, pendingRes, mailRes, masters, reminders] = await Promise.all([
     supabase.from("transactions").select(TX_COLUMNS).gte("date", month.from).lte("date", month.to),
     supabase
       .from("transactions")
@@ -31,6 +31,11 @@ export default async function DashboardPage() {
       .from("transactions")
       .select("id", { count: "exact", head: true })
       .eq("status", "pending_review"),
+    // 未解析のまま残っているメール（パーサー未対応の差出人など）と、解析に失敗したもの
+    supabase
+      .from("email_messages")
+      .select("id", { count: "exact", head: true })
+      .in("status", ["unparsed", "failed"]),
     loadMasters(),
     loadImportReminders(todayJst()),
   ]);
@@ -84,6 +89,7 @@ export default async function DashboardPage() {
     .reduce((a, acc) => a - (balances.get(acc.id) ?? 0), 0);
 
   const pendingCount = pendingRes.count ?? 0;
+  const mailCount = mailRes.count ?? 0;
 
   return (
     <>
@@ -137,6 +143,15 @@ export default async function DashboardPage() {
           className="mt-4 block rounded-xl border border-amber-900 bg-amber-950/40 p-4 text-sm text-amber-300"
         >
           未分類の取引が {pendingCount} 件あります →
+        </Link>
+      )}
+
+      {mailCount > 0 && (
+        <Link
+          href="/emails"
+          className="mt-3 block rounded-xl border border-amber-900 bg-amber-950/40 p-4 text-sm text-amber-300"
+        >
+          取り込めていないメールが {mailCount} 件あります →
         </Link>
       )}
 
