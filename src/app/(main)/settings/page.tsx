@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { signOut } from "@/app/login/actions";
 import { createClient, getUser } from "@/lib/supabase/server";
+import { SubmitButton } from "@/components/submit-button";
 
 export default async function SettingsPage() {
   const user = await getUser();
@@ -61,12 +62,12 @@ export default async function SettingsPage() {
       </dl>
 
       <form action={signOut} className="mt-6">
-        <button
-          type="submit"
+        <SubmitButton
+          pendingLabel="ログアウトしています…"
           className="w-full rounded-xl border border-slate-700 py-3 text-sm font-medium text-slate-300"
         >
           ログアウト
-        </button>
+        </SubmitButton>
       </form>
     </>
   );

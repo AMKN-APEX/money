@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { shortDate } from "@/lib/format";
+import { SubmitButton } from "@/components/submit-button";
 import { ignoreEmail, parseEmails, reparseIgnored, restoreEmail, retryEmail } from "./actions";
 
 type EmailMessage = {
@@ -116,23 +117,23 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
             : "未解析のメールはありません。"}
         </p>
         <form action={parseEmails}>
-          <button
-            type="submit"
+          <SubmitButton
+            pendingLabel="解析しています…"
             className={`mt-3 w-full rounded-lg border py-2.5 text-xs ${
               unparsed > 0 ? "border-amber-700 text-amber-200" : "border-slate-700 text-slate-300"
             }`}
           >
             いま解析する
-          </button>
+          </SubmitButton>
         </form>
         {(ignoredCount.count ?? 0) > 0 && (
           <form action={reparseIgnored}>
-            <button
-              type="submit"
+            <SubmitButton
+              pendingLabel="解析しています…"
               className="mt-2 w-full rounded-lg border border-slate-700 py-2.5 text-xs text-slate-300"
             >
               対象外の {ignoredCount.count} 件も解析し直す
-            </button>
+            </SubmitButton>
           </form>
         )}
       </div>
@@ -200,22 +201,22 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
                         {m.status === "failed" && (
                           <form action={retryEmail}>
                             <input type="hidden" name="id" value={m.id} />
-                            <button
-                              type="submit"
+                            <SubmitButton
+                              pendingLabel="解析しています…"
                               className="w-full rounded-lg border border-slate-700 py-2.5 text-xs text-slate-300"
                             >
                               もう一度解析する
-                            </button>
+                            </SubmitButton>
                           </form>
                         )}
                         <form action={m.status === "ignored" ? restoreEmail : ignoreEmail}>
                           <input type="hidden" name="id" value={m.id} />
-                          <button
-                            type="submit"
+                          <SubmitButton
+                            pendingLabel={m.status === "ignored" ? "解析しています…" : "処理中…"}
                             className="w-full rounded-lg border border-slate-700 py-2.5 text-xs text-slate-300"
                           >
                             {m.status === "ignored" ? "未解析に戻す" : "対象外にする"}
-                          </button>
+                          </SubmitButton>
                         </form>
                       </div>
                     </>

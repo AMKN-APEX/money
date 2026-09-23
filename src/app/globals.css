@@ -16,3 +16,45 @@ html {
 body {
   font-family: var(--font-sans);
 }
+
+/*
+  押した手応えを全てのボタン・リンクに共通で付ける。
+
+  iPhone にはカーソルが無いため、押せたかどうかを判断する手段が
+  「見た目が変わること」しかない。個別に active: を書く方式だと
+  必ず付け忘れが出るので、素の要素に当てておく。
+*/
+button,
+a,
+summary,
+[role="button"] {
+  cursor: pointer;
+  /* iOS 既定のハイライトは要素によって出たり出なかったりする。自前で出す */
+  -webkit-tap-highlight-color: transparent;
+  /* ダブルタップ拡大の待ち時間（約300ms）を無くし、反応を早く見せる */
+  touch-action: manipulation;
+  transition:
+    transform 80ms ease-out,
+    filter 80ms ease-out,
+    opacity 80ms ease-out;
+}
+
+button:active:not(:disabled),
+a:active,
+summary:active,
+[role="button"]:active {
+  transform: scale(0.97);
+  filter: brightness(1.4);
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* 押している間に文字が選択されてしまうのを防ぐ */
+button,
+[role="button"] {
+  -webkit-user-select: none;
+  user-select: none;
+}

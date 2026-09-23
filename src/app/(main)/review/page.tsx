@@ -4,6 +4,7 @@ import { loadMasters } from "@/lib/queries";
 import { shortDate, yen } from "@/lib/format";
 import type { Category, Transaction } from "@/lib/types";
 import { resolvePending } from "./actions";
+import { SubmitButton } from "@/components/submit-button";
 
 const KIND_LABEL = { expense: "支出", income: "収入", transfer: "振替" } as const;
 
@@ -124,12 +125,12 @@ export default async function ReviewPage() {
                 >
                   詳しく編集
                 </Link>
-                <button
-                  type="submit"
+                <SubmitButton
+                  pendingLabel="確定中…"
                   className="flex-1 rounded-lg bg-emerald-500 py-2.5 text-sm font-semibold text-slate-950"
                 >
                   確定
-                </button>
+                </SubmitButton>
               </div>
             </form>
           ))}
