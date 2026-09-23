@@ -42,7 +42,7 @@ type EmailRow = {
   body: string;
 };
 
-type AccountRow = { id: string; name: string; email_card_pattern: string | null };
+type AccountRow = { id: string; name: string; card_patterns: string[] | null };
 
 const EMPTY: EmailApplyResult = {
   processed: 0,
@@ -71,7 +71,7 @@ export async function applyEmailParsers(
   if (emails.length === 0) return { ...EMPTY };
 
   const [{ data: accountRows }, { data: ruleRows }] = await Promise.all([
-    supabase.from("accounts").select("id, name, email_card_pattern").eq("user_id", userId),
+    supabase.from("accounts").select("id, name, card_patterns").eq("user_id", userId),
     supabase
       .from("rules")
       .select(
@@ -122,7 +122,7 @@ export async function applyEmailParsers(
         parser_id: parser.id,
         error:
           `カードを特定できませんでした（本文のカード名: ${parsed.cardLabel ?? "読み取れず"}）。` +
-          "口座の email_card_pattern に、このカード名に当たるパターンを登録してください。",
+          "口座の card_patterns に、このカード名に当たるパターンを登録してください。",
       });
       result.failed++;
       continue;
@@ -182,9 +182,10 @@ function resolveAccount(accounts: AccountRow[], cardLabel: string | null): Accou
 
   return (
     accounts
-      .filter((a) => a.email_card_pattern && normalized.includes(a.email_card_pattern))
+      .flatMap((a) => (a.card_patterns ?? []).map((pattern) => ({ account: a, pattern })))
+      .filter(({ pattern }) => pattern && normalized.includes(pattern))
       // 「ZOZOCARD」と「ZOZOCARD2」のように複数当たったら、長いほうを採る
-      .sort((a, b) => (b.email_card_pattern?.length ?? 0) - (a.email_card_pattern?.length ?? 0))[0] ?? null
+      .sort((x, y) => y.pattern.length - x.pattern.length)[0]?.account ?? null
   );
 }
 

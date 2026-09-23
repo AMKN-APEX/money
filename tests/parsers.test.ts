@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { kyotoParser } from "../src/lib/parsers/kyoto";
 import { yuchoParser } from "../src/lib/parsers/yucho";
+import { vpassParser } from "../src/lib/parsers/vpass";
 import { verifyBalanceChain } from "../src/lib/parsers/balance-chain";
 import { resolveYear, toAmount } from "../src/lib/parsers/csv";
 import { normalizeMerchant } from "../src/lib/normalize";
@@ -192,4 +193,71 @@ test("ルール: priority の小さいものが優先される", () => {
 
   assert.equal(got.ruleId, "narrow");
   assert.equal(got.to_account_id, "zozo");
+});
+
+// ---------------------------------------------------------------- Vpass
+
+test("Vpass: 1ファイルに入った2枚ぶんを、カード名ごとに振り分ける", () => {
+  const r = vpassParser.parse(fixture("vpass-sample.csv"), "202609.csv", "2026-09-23");
+
+  assert.equal(r.error, null);
+  assert.equal(r.rows.length, 8);
+  assert.equal(r.periodFrom, "2026-08-02");
+  assert.equal(r.periodTo, "2026-08-28");
+
+  const cards = [...new Set(r.rows.map((x) => x.cardLabel))];
+  assert.deepEqual(cards, ["三井住友カードデビュープラスＶＩＳＡ", "ＡｐｐｌｅＰａｙ／ｉＤ"]);
+});
+
+test("Vpass: 返品はマイナス金額で来るので入金として扱う", () => {
+  const r = vpassParser.parse(fixture("vpass-sample.csv"), "202609.csv", "2026-09-23");
+  const refund = r.rows.find((x) => x.memo === "返品");
+
+  assert.ok(refund);
+  assert.equal(refund.direction, "in");
+  assert.equal(refund.amount, 1970);
+});
+
+test("Vpass: 同じ日・同じ店・同じ金額の明細が2件並んでも取りこぼさない", () => {
+  // 実例: 2026/08/24 JR九州列車予約サービス 1,970円 × 2
+  const r = vpassParser.parse(fixture("vpass-sample.csv"), "202609.csv", "2026-09-23");
+  const same = r.rows.filter((x) => x.date === "2026-08-24");
+
+  assert.equal(same.length, 2);
+  assert.notEqual(same[0].dedupSeed, same[1].dedupSeed);
+});
+
+test("Vpass: 備考（iDの店舗名・海外レート）をメモに残す", () => {
+  const r = vpassParser.parse(fixture("vpass-sample.csv"), "202609.csv", "2026-09-23");
+
+  assert.equal(
+    r.rows.find((x) => x.merchant === "ファミリーマート／ｉＤ")?.memo,
+    "ﾌｱﾐﾘ-ﾏ-ﾄｶﾔｼﾏｴｷﾏｴ/ID",
+  );
+});
+
+test("Vpass: 合計行と明細が食い違えば警告する", () => {
+  const broken = fixture("vpass-sample.csv").replace(",,,,,47500,", ",,,,,99999,");
+  const r = vpassParser.parse(broken, "202609.csv", "2026-09-23");
+
+  assert.equal(r.error, null);
+  assert.ok(r.warnings.some((w) => w.includes("合計が明細と合いません")));
+});
+
+test("Vpass: 合計が合っていれば警告しない", () => {
+  const r = vpassParser.parse(fixture("vpass-sample.csv"), "202609.csv", "2026-09-23");
+  assert.deepEqual(r.warnings, []);
+});
+
+test("Vpass: 銀行のCSVを渡したら拒否する", () => {
+  assert.equal(vpassParser.looksLikeMine(fixture("kyoto-sample.csv")), false);
+  assert.equal(kyotoParser.looksLikeMine(fixture("vpass-sample.csv")), false);
+  assert.equal(vpassParser.looksLikeMine(fixture("vpass-sample.csv")), true);
+});
+
+test("Vpass: カード名は normalizeMerchant を通すとシード済みのパターンに当たる", () => {
+  // supabase/migrations/20260923000002_vpass.sql で登録したパターン
+  assert.ok(normalizeMerchant("三井住友カードデビュープラスＶＩＳＡ").includes("デビユープラス"));
+  assert.ok(normalizeMerchant("ＡｐｐｌｅＰａｙ／ｉＤ").includes("APPLEPAY/ID"));
+  assert.ok(normalizeMerchant("Ａｍａｚｏｎマスター").includes("AMAZON"));
 });

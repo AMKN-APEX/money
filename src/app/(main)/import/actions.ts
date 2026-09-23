@@ -4,25 +4,33 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeMerchant } from "@/lib/normalize";
 import { classify, type Rule } from "@/lib/rules";
-import {
-  findEmailMatch,
-  keepsClassification,
-  type EmailTransaction,
-} from "@/lib/merge-email";
+import { findEmailMatch, keepsClassification, type EmailTransaction } from "@/lib/merge-email";
 import { kyotoParser } from "@/lib/parsers/kyoto";
 import { yuchoParser } from "@/lib/parsers/yucho";
+import { vpassParser } from "@/lib/parsers/vpass";
 import { lastKnownBalance, verifyBalanceChain, type ChainIssue } from "@/lib/parsers/balance-chain";
-import type { ParserId } from "@/lib/parsers/types";
+import type { ParsedRow, ParserId } from "@/lib/parsers/types";
 import { todayJst } from "@/lib/format";
 import type { Account, TxType } from "@/lib/types";
 
-const PARSERS = { kyoto: kyotoParser, yucho: yuchoParser };
+const PARSERS = { kyoto: kyotoParser, yucho: yuchoParser, vpass: vpassParser };
 
-export type ImportSummary = {
+/** 口座1つぶんの取込結果 */
+export type AccountSummary = {
   accountName: string;
-  parsed: number;
   inserted: number;
   /** メール速報の行を上書きした件数（3章の重複排除） */
+  merged: number;
+  skipped: number;
+  pendingReview: number;
+  openingBalance: number | null;
+};
+
+export type ImportSummary = {
+  /** 1ファイルに複数カードが入ることがある（Vpass。9.10） */
+  accounts: AccountSummary[];
+  parsed: number;
+  inserted: number;
   merged: number;
   skipped: number;
   pendingReview: number;
@@ -30,13 +38,15 @@ export type ImportSummary = {
   periodTo: string | null;
   warnings: string[];
   chainIssues: ChainIssue[];
-  openingBalance: number | null;
 };
 
 export type ImportState = {
   error: string | null;
   summary: ImportSummary | null;
 };
+
+type AccountRow = Pick<Account, "id" | "name" | "type"> & { card_patterns: string[] | null };
+type Supabase = Awaited<ReturnType<typeof createClient>>;
 
 function field(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
@@ -49,38 +59,41 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
   const fileHash = field(formData, "file_hash");
   const content = String(formData.get("content") ?? "");
 
-  if (!accountId) return fail("取り込み先の口座を選んでください");
   if (!(parserId in PARSERS)) return fail("対応していないCSVの形式です");
   if (!content) return fail("ファイルの中身が空です");
   if (!fileHash) return fail("ファイルの識別子を作れませんでした");
 
+  const parser = PARSERS[parserId];
+  if (parser.accountSource === "user" && !accountId) {
+    return fail("取り込み先の口座を選んでください");
+  }
+
   const supabase = await createClient();
 
-  const { data: accountRow, error: accountError } = await supabase
+  const { data: accountRows, error: accountError } = await supabase
     .from("accounts")
-    .select("id, name, type")
-    .eq("id", accountId)
-    .maybeSingle();
+    .select("id, name, type, card_patterns");
   if (accountError) return fail(`口座を読めませんでした: ${accountError.message}`);
-  if (!accountRow) return fail("その口座は存在しません");
-  const account = accountRow as Pick<Account, "id" | "name" | "type">;
+  const accounts = (accountRows ?? []) as AccountRow[];
 
   // 9.5: 同じ内容のファイルは取り込まない。
   // 実例として ny20260922172847.csv と ny20260922174646.csv が同一内容だった。
+  // 1ファイルから口座ごとに履歴を作るので、口座を問わず1件でもあれば取込済み。
   const { data: already } = await supabase
     .from("import_batches")
-    .select("id, filename, imported_at")
+    .select("filename, imported_at")
     .eq("file_hash", fileHash)
-    .maybeSingle();
-  if (already) {
+    .limit(1);
+  if (already && already.length > 0) {
+    const b = already[0] as { filename: string; imported_at: string };
     return fail(
-      `このファイルは取込済みです（${already.filename} / ${String(already.imported_at).slice(0, 10)}）。` +
+      `このファイルは取込済みです（${b.filename} / ${String(b.imported_at).slice(0, 10)}）。` +
         "中身が同一のため、二重計上を避けて中止しました。",
     );
   }
 
   // クライアント側の解析結果は信用せず、ここで解析し直す
-  const parsed = PARSERS[parserId].parse(content, filename, todayJst());
+  const parsed = parser.parse(content, filename, todayJst());
   if (parsed.error) return fail(parsed.error);
   if (parsed.rows.length === 0) return fail("取り込める明細がありませんでした");
 
@@ -92,21 +105,8 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
     );
   }
 
-  // 9.4: 前回取り込んだ期間との間に空きがあれば知らせる
-  const { data: coverage } = await supabase
-    .from("import_coverage")
-    .select("covered_to")
-    .eq("account_id", accountId)
-    .maybeSingle();
-  if (coverage?.covered_to && parsed.periodFrom) {
-    const gapStart = nextDay(String(coverage.covered_to));
-    if (parsed.periodFrom > gapStart) {
-      warnings.push(
-        `${gapStart} から ${prevDay(parsed.periodFrom)} までが未取込です。` +
-          "この期間のCSVもダウンロードしてください。",
-      );
-    }
-  }
+  const grouped = groupByAccount(parsed.rows, parser.accountSource, accounts, accountId);
+  if ("error" in grouped) return fail(grouped.error);
 
   const { data: ruleRows, error: ruleError } = await supabase
     .from("rules")
@@ -116,13 +116,130 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
   if (ruleError) return fail(`ルールを読めませんでした: ${ruleError.message}`);
   const rules = (ruleRows ?? []) as unknown as Rule[];
 
-  // 行単位の重複排除。ゆうちょは明細IDで、京都銀行は行の内容から作ったキーで判定する
+  const summaries: AccountSummary[] = [];
+  for (const group of grouped.groups) {
+    const result = await importGroup(supabase, group, rules, filename, fileHash, warnings);
+    if ("error" in result) return fail(result.error);
+    summaries.push(result.summary);
+  }
+
+  revalidatePath("/", "layout");
+
+  return {
+    error: null,
+    summary: {
+      accounts: summaries,
+      parsed: parsed.rows.length,
+      inserted: sum(summaries, (s) => s.inserted),
+      merged: sum(summaries, (s) => s.merged),
+      skipped: sum(summaries, (s) => s.skipped),
+      pendingReview: sum(summaries, (s) => s.pendingReview),
+      periodFrom: parsed.periodFrom,
+      periodTo: parsed.periodTo,
+      warnings,
+      chainIssues: chain.issues,
+    },
+  };
+}
+
+type Group = { account: AccountRow; rows: ParsedRow[] };
+
+/**
+ * 明細を口座ごとに振り分ける。
+ *
+ * Vpass のCSVは1ファイルに複数カードが入る（9.10）ため、利用者に選ばせず
+ * カード名から決める。**当てはまる口座が無ければ取り込まない。**
+ * 推測で別のカードに積むと、銀行明細では2枚を区別できない（9.3）ぶん
+ * あとから気づけなくなる。
+ */
+function groupByAccount(
+  rows: ParsedRow[],
+  source: "user" | "file",
+  accounts: AccountRow[],
+  selectedId: string,
+): { groups: Group[] } | { error: string } {
+  if (source === "user") {
+    const account = accounts.find((a) => a.id === selectedId);
+    if (!account) return { error: "その口座は存在しません" };
+    return { groups: [{ account, rows }] };
+  }
+
+  const groups = new Map<string, Group>();
+  const unknown = new Set<string>();
+
+  for (const row of rows) {
+    const label = row.cardLabel ?? "";
+    const account = resolveCard(accounts, label);
+    if (!account) {
+      unknown.add(label || "(カード名なし)");
+      continue;
+    }
+    const group = groups.get(account.id) ?? { account, rows: [] };
+    group.rows.push(row);
+    groups.set(account.id, group);
+  }
+
+  if (unknown.size > 0) {
+    return {
+      error:
+        `どの口座のカードか分からない明細があります: ${[...unknown].join(" / ")}。` +
+        "口座の card_patterns にこのカード名を登録してください。" +
+        "取り違えを避けるため、ファイル全体の取り込みを中止しました。",
+    };
+  }
+  if (groups.size === 0) return { error: "取り込める明細がありませんでした" };
+  return { groups: [...groups.values()] };
+}
+
+function resolveCard(accounts: AccountRow[], cardLabel: string): AccountRow | null {
+  if (!cardLabel) return null;
+  const normalized = normalizeMerchant(cardLabel);
+
+  return (
+    accounts
+      .flatMap((a) => (a.card_patterns ?? []).map((pattern) => ({ account: a, pattern })))
+      .filter(({ pattern }) => pattern && normalized.includes(pattern))
+      // 複数当たったら長いほうを採る
+      .sort((x, y) => y.pattern.length - x.pattern.length)[0]?.account ?? null
+  );
+}
+
+async function importGroup(
+  supabase: Supabase,
+  group: Group,
+  rules: Rule[],
+  filename: string,
+  fileHash: string,
+  warnings: string[],
+): Promise<{ summary: AccountSummary } | { error: string }> {
+  const { account, rows } = group;
+  const dates = rows.map((r) => r.date).sort();
+  const periodFrom = dates[0];
+  const periodTo = dates[dates.length - 1];
+
+  // 9.4: 前回取り込んだ期間との間に空きがあれば知らせる
+  const { data: coverage } = await supabase
+    .from("import_coverage")
+    .select("covered_to")
+    .eq("account_id", account.id)
+    .maybeSingle();
+  if (coverage?.covered_to) {
+    const gapStart = nextDay(String(coverage.covered_to));
+    if (periodFrom > gapStart) {
+      warnings.push(
+        `${account.name}: ${gapStart} から ${prevDay(periodFrom)} までが未取込です。` +
+          "この期間のCSVもダウンロードしてください。",
+      );
+    }
+  }
+
+  // 行単位の重複排除。ゆうちょは明細IDで、それ以外は行の内容から作ったキーで判定する
   const { data: existingRows } = await supabase
     .from("transactions")
     .select("dedup_key, source_ref")
-    .eq("account_id", accountId)
-    .gte("date", parsed.periodFrom ?? "1900-01-01")
-    .lte("date", parsed.periodTo ?? "2999-12-31");
+    .eq("account_id", account.id)
+    .gte("date", periodFrom)
+    .lte("date", periodTo);
   const seenKeys = new Set<string>();
   const seenRefs = new Set<string>();
   for (const r of (existingRows ?? []) as { dedup_key: string | null; source_ref: string | null }[]) {
@@ -135,10 +252,10 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
   const { data: emailRows } = await supabase
     .from("transactions")
     .select("id, date, amount, merchant_normalized, category_id, status, memo")
-    .eq("account_id", accountId)
+    .eq("account_id", account.id)
     .eq("source", "email")
-    .gte("date", shiftDay(parsed.periodFrom ?? "1900-01-01", -3))
-    .lte("date", shiftDay(parsed.periodTo ?? "2999-12-31", 3));
+    .gte("date", shiftDay(periodFrom, -3))
+    .lte("date", shiftDay(periodTo, 3));
   const emailCandidates = (emailRows ?? []) as EmailTransaction[];
 
   let skipped = 0;
@@ -147,8 +264,8 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
   const merges: { id: string; patch: Record<string, unknown> }[] = [];
   const mergedIds = new Set<string>();
 
-  for (const row of parsed.rows) {
-    const dedupKey = `${accountId}:${row.dedupSeed}`;
+  for (const row of rows) {
+    const dedupKey = `${account.id}:${row.dedupSeed}`;
     if (seenKeys.has(dedupKey) || (row.sourceRef && seenRefs.has(row.sourceRef))) {
       skipped++;
       continue;
@@ -156,12 +273,12 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
     seenKeys.add(dedupKey);
     if (row.sourceRef) seenRefs.add(row.sourceRef);
 
-    const cls = classify({ matchText: row.matchText, direction: row.direction }, accountId, rules);
+    const cls = classify({ matchText: row.matchText, direction: row.direction }, account.id, rules);
 
     let type: TxType = cls.type;
     let toAccountId = cls.to_account_id;
     let status: "confirmed" | "pending_review" = cls.ruleId ? "confirmed" : "pending_review";
-    let memo = cls.memo;
+    let memo = joinMemo(row.memo ?? null, cls.memo);
 
     // 9.3: 振替と分かっても相手口座を特定できない場合がある
     // （三井住友カード2枚が同じ摘要になる）。保留にして人に決めてもらう。
@@ -169,8 +286,9 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
       type = row.direction === "in" ? "income" : "expense";
       toAccountId = null;
       status = "pending_review";
-      memo = memo ?? "振替の可能性あり（相手口座を特定できませんでした）";
+      memo = joinMemo(memo, "振替の可能性あり（相手口座を特定できませんでした）");
     }
+
     const decision = findEmailMatch(
       { date: row.date, amount: row.amount, matchText: row.matchText },
       emailCandidates,
@@ -212,7 +330,7 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
                 channel: cls.channel,
                 status,
               }),
-          memo: target.memo ?? memo,
+          memo: joinMemo(target.memo, row.memo ?? null) ?? memo,
         },
       });
       continue;
@@ -224,7 +342,7 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
       date: row.date,
       amount: row.amount,
       type,
-      account_id: accountId,
+      account_id: account.id,
       to_account_id: toAccountId,
       category_id: cls.category_id,
       merchant: row.merchant || null,
@@ -242,17 +360,17 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
   const { data: batch, error: batchError } = await supabase
     .from("import_batches")
     .insert({
-      account_id: accountId,
+      account_id: account.id,
       filename,
       file_hash: fileHash,
-      period_from: parsed.periodFrom,
-      period_to: parsed.periodTo,
+      period_from: periodFrom,
+      period_to: periodTo,
       row_count: pending.length + merges.length,
       dup_count: skipped,
     })
     .select("id")
     .single();
-  if (batchError) return fail(`取込履歴を作れませんでした: ${batchError.message}`);
+  if (batchError) return { error: `取込履歴を作れませんでした: ${batchError.message}` };
 
   if (pending.length > 0) {
     const withBatch = pending.map((p) => ({ ...p, import_batch_id: batch.id }));
@@ -260,7 +378,7 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
     if (insertError) {
       // 取引が入らなかったのに履歴だけ残ると、次回この file_hash で弾かれてしまう
       await supabase.from("import_batches").delete().eq("id", batch.id);
-      return fail(`取り込めませんでした: ${insertError.message}`);
+      return { error: `取り込めませんでした: ${insertError.message}` };
     }
   }
 
@@ -276,27 +394,15 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
     }
   }
 
-  const openingBalance = await reconcileOpeningBalance(
-    supabase,
-    account,
-    lastKnownBalance(parsed.rows),
-  );
-
-  revalidatePath("/", "layout");
+  const openingBalance = await reconcileOpeningBalance(supabase, account, lastKnownBalance(rows));
 
   return {
-    error: null,
     summary: {
       accountName: account.name,
-      parsed: parsed.rows.length,
       inserted: pending.length,
       merged: merges.length,
       skipped,
       pendingReview,
-      periodFrom: parsed.periodFrom,
-      periodTo: parsed.periodTo,
-      warnings,
-      chainIssues: chain.issues,
       openingBalance,
     },
   };
@@ -311,11 +417,11 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
  * 手入力させると取込後に二重計上になるため、必ずここで計算する。
  */
 async function reconcileOpeningBalance(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: Supabase,
   account: Pick<Account, "id" | "name" | "type">,
   last: { date: string; balance: number } | null,
 ): Promise<number | null> {
-  // カードの明細は「残高」の意味が違うので対象外
+  // カードの明細は残高を持たないので対象外
   if (!last || (account.type !== "bank" && account.type !== "emoney")) return null;
 
   const { data, error } = await supabase
@@ -347,6 +453,15 @@ async function reconcileOpeningBalance(
     .eq("id", account.id);
 
   return opening;
+}
+
+function joinMemo(...parts: (string | null)[]): string | null {
+  const kept = parts.filter((p): p is string => Boolean(p));
+  return kept.length > 0 ? kept.join(" / ") : null;
+}
+
+function sum<T>(items: T[], pick: (item: T) => number): number {
+  return items.reduce((acc, item) => acc + pick(item), 0);
 }
 
 function fail(error: string): ImportState {

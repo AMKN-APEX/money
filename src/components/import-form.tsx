@@ -5,15 +5,19 @@ import { useFormStatus } from "react-dom";
 import { importCsv, type ImportState } from "@/app/(main)/import/actions";
 import { kyotoParser } from "@/lib/parsers/kyoto";
 import { yuchoParser } from "@/lib/parsers/yucho";
+import { vpassParser } from "@/lib/parsers/vpass";
 import { verifyBalanceChain } from "@/lib/parsers/balance-chain";
 import type { BankParser, ParserId } from "@/lib/parsers/types";
 import { todayJst, yen } from "@/lib/format";
 import type { Account } from "@/lib/types";
 
-const PARSERS: BankParser[] = [kyotoParser, yuchoParser];
+const PARSERS: BankParser[] = [kyotoParser, yuchoParser, vpassParser];
 
-/** パーサーと口座の対応。seed の issuer と合わせている */
-const ISSUER_OF: Record<ParserId, string> = {
+/**
+ * パーサーと口座の対応。seed の issuer と合わせている。
+ * vpass は1ファイルに複数カードが入るので、口座はサーバー側がカード名から決める。
+ */
+const ISSUER_OF: Partial<Record<ParserId, string>> = {
   kyoto: "京都銀行",
   yucho: "ゆうちょ銀行",
 };
@@ -28,6 +32,16 @@ function decode(buffer: ArrayBuffer): string {
   } catch {
     return new TextDecoder("shift_jis").decode(buffer);
   }
+}
+
+/** 明細をカード名ごとに数える。取り込む前に「何が入っているか」を見せる */
+function countCards(rows: { cardLabel?: string | null }[]): { label: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.cardLabel) continue;
+    counts.set(row.cardLabel, (counts.get(row.cardLabel) ?? 0) + 1);
+  }
+  return [...counts].map(([label, count]) => ({ label, count }));
 }
 
 async function sha256(buffer: ArrayBuffer): Promise<string> {
@@ -45,6 +59,8 @@ type Preview = {
   periodTo: string | null;
   warnings: string[];
   chainIssues: { lineNo: number; date: string; diff: number }[];
+  /** ファイル内に入っていたカード名（Vpass は複数枚ぶんが1ファイルに入る） */
+  cards: { label: string; count: number }[];
   error: string | null;
 };
 
@@ -91,8 +107,11 @@ export function ImportForm({ accounts }: { accounts: Account[] }) {
         periodTo: null,
         warnings: [],
         chainIssues: [],
+        cards: [],
         error:
-          "どの金融機関のCSVか判別できませんでした。対応しているのは京都銀行とゆうちょ銀行です。",
+          "どの金融機関のCSVか判別できませんでした。対応しているのは " +
+          PARSERS.map((p) => p.label).join(" / ") +
+          " です。",
       });
       return;
     }
@@ -110,16 +129,20 @@ export function ImportForm({ accounts }: { accounts: Account[] }) {
       periodTo: parsed.periodTo,
       warnings: parsed.warnings,
       chainIssues: chain.issues,
+      cards: countCards(parsed.rows),
       error: parsed.error,
     });
 
     // 判別できた金融機関の口座を選んでおく
     const issuer = ISSUER_OF[parser.id];
-    const match = accounts.find((a) => a.issuer === issuer);
-    if (match) setAccountId(match.id);
+    const match = issuer ? accounts.find((a) => a.issuer === issuer) : undefined;
+    setAccountId(match?.id ?? "");
   }
 
-  const ready = Boolean(preview?.parser && !preview.error && accountId);
+  // Vpass はファイル内のカード名から口座が決まるので、選ばせない
+  const picksAccount = preview?.parser?.accountSource !== "file";
+  const ready = Boolean(preview?.parser && !preview.error && (!picksAccount || accountId));
+  const cards = preview?.cards ?? [];
 
   return (
     <form action={formAction} className="flex flex-col gap-5">
@@ -164,6 +187,17 @@ export function ImportForm({ accounts }: { accounts: Account[] }) {
                 </div>
               </dl>
 
+              {cards.length > 0 && (
+                <ul className="mt-3 flex flex-col gap-1 text-xs">
+                  {cards.map((c) => (
+                    <li key={c.label} className="flex justify-between gap-3">
+                      <span className="truncate text-slate-300">{c.label}</span>
+                      <span className="shrink-0 text-slate-500 tabular-nums">{c.count} 件</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
               <p className="mt-3 text-xs text-slate-500">
                 残高チェーン:{" "}
                 {preview.chainIssues.length === 0 ? (
@@ -191,21 +225,28 @@ export function ImportForm({ accounts }: { accounts: Account[] }) {
         </section>
       )}
 
-      <label className="flex flex-col gap-1.5">
-        <span className="text-sm text-slate-400">取り込み先の口座</span>
-        <select
-          value={accountId}
-          onChange={(e) => setAccountId(e.target.value)}
-          className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-base outline-none focus:border-emerald-500"
-        >
-          <option value="">選択してください</option>
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      {picksAccount ? (
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm text-slate-400">取り込み先の口座</span>
+          <select
+            value={accountId}
+            onChange={(e) => setAccountId(e.target.value)}
+            className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-base outline-none focus:border-emerald-500"
+          >
+            <option value="">選択してください</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <p className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-xs text-slate-400">
+          取り込み先は、ファイルに書かれたカード名から自動で決まります。
+          当てはまる口座が無いカードがあれば、取り違えを避けるため取り込みを中止します。
+        </p>
+      )}
 
       {state.error && (
         <p role="alert" className="rounded-xl border border-rose-900 bg-rose-950/40 p-4 text-sm text-rose-300">
@@ -224,7 +265,7 @@ function Summary({ summary }: { summary: NonNullable<ImportState["summary"]> }) 
   return (
     <section className="rounded-2xl border border-emerald-900 bg-emerald-950/30 p-4 text-sm">
       <p className="font-semibold text-emerald-300">
-        {summary.accountName} に取り込みました
+        {summary.accounts.map((a) => a.accountName).join(" / ")} に取り込みました
       </p>
       <dl className="mt-3 grid grid-cols-4 gap-2 text-center text-xs">
         <div className="rounded-lg bg-slate-950/50 p-2">
@@ -250,10 +291,28 @@ function Summary({ summary }: { summary: NonNullable<ImportState["summary"]> }) 
         </div>
       </dl>
 
-      {summary.openingBalance !== null && (
-        <p className="mt-3 text-xs text-slate-400">
-          明細の残高から開始残高を {yen(summary.openingBalance)} と算出し、口座に設定しました。
-        </p>
+      {/* 1ファイルに複数カードが入る場合は内訳を出す（Vpass。9.10） */}
+      {summary.accounts.length > 1 && (
+        <ul className="mt-3 flex flex-col gap-1 text-xs text-slate-400">
+          {summary.accounts.map((a) => (
+            <li key={a.accountName} className="flex justify-between gap-3">
+              <span className="truncate">{a.accountName}</span>
+              <span className="shrink-0 tabular-nums">
+                追加 {a.inserted} / 上書き {a.merged} / 除外 {a.skipped}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {summary.accounts.map(
+        (a) =>
+          a.openingBalance !== null && (
+            <p key={a.accountName} className="mt-3 text-xs text-slate-400">
+              {a.accountName}: 明細の残高から開始残高を {yen(a.openingBalance)} と算出し、
+              口座に設定しました。
+            </p>
+          ),
       )}
 
       {summary.warnings.map((w) => (

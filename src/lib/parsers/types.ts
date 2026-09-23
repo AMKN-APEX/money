@@ -18,6 +18,14 @@ export type ParsedRow = {
   dedupSeed: string;
   /** エラー表示用の行番号（1始まり） */
   lineNo: number;
+  /**
+   * ファイル内に書かれていたカードの名前。
+   * Vpass のCSVは1ファイルに複数カードが入るため、行ごとにどのカードか持つ。
+   * 口座を利用者に選ばせる銀行CSVでは null。
+   */
+  cardLabel?: string | null;
+  /** 明細に付いてきた補足（iDの店舗名・海外利用のレート・返品など） */
+  memo?: string | null;
 };
 
 export type ParseResult = {
@@ -30,11 +38,17 @@ export type ParseResult = {
   error: string | null;
 };
 
-export type ParserId = "kyoto" | "yucho";
+export type ParserId = "kyoto" | "yucho" | "vpass";
 
 export type BankParser = {
   id: ParserId;
   label: string;
+  /**
+   * 取り込み先の口座をどう決めるか。
+   *   user … 利用者が選ぶ（銀行CSV。ファイルに口座の手がかりが無い）
+   *   file … ファイル内のカード名から決める（Vpass。1ファイルに複数カード）
+   */
+  accountSource: "user" | "file";
   /** その口座のCSVらしいか。アップロード時の取り違え防止 */
   looksLikeMine(text: string): boolean;
   parse(text: string, filename: string, today: string): ParseResult;
