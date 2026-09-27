@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient, getUser } from "@/lib/supabase/server";
 import { applyEmailParsers, type EmailApplyResult } from "@/lib/email-apply";
+import { parserFor } from "@/lib/parsers/email";
 
 /**
  * 解析の結果を必ず画面に返す。
@@ -111,21 +112,43 @@ export async function retryEmail(formData: FormData) {
 }
 
 /**
- * 対象外にしたメールを全部まとめて解析し直す。
+ * 対象外にしたメールの中に、利用通知が紛れていないか調べる。
  *
  * パーサーが無かった頃に手で対象外にしたメールを拾い直すための操作。
- * 安全に押せる: 利用通知でないメールは、解析がもう一度そう判断して
- * 対象外へ戻る。すでに取引になっているメールは重複キーで弾かれる。
+ * **対象外のメールの状態は変えずに、その場で読み直す。** 利用通知と読めたものだけを
+ * 未解析に戻して取り込み、それ以外は対象外のまま残す。
  *
- * 戻り先は対象外を表示した状態にする。隠れたままだと結果を確かめようがない。
+ * 以前は全部をいったん未解析に戻してから解析していた。パーサーの無い差出人
+ * （ZOZOTOWN の宣伝・PayPayカードの案内など）は解析しても判断できないので、
+ * 見直したかっただけのメールが全部「未解析」に散らばった（2026-09-27）。
  */
 export async function reparseIgnored() {
   const supabase = await createClient();
-  await supabase
+  const { data } = await supabase
     .from("email_messages")
-    .update({ status: "unparsed", error: null })
+    .select("id, from_address, body")
     .eq("status", "ignored");
+  const ignored = (data ?? []) as { id: string; from_address: string | null; body: string }[];
 
+  // パーサーの無い差出人と、読んでも利用通知でないメールは触らない
+  const reopen = ignored
+    .filter((m) => {
+      const parser = parserFor(m.from_address);
+      return parser !== null && parser.parse(m.body).kind !== "other";
+    })
+    .map((m) => m.id);
+
+  if (reopen.length === 0) {
+    backToList(`対象外の ${ignored.length} 件を読み直しました。利用通知は見つからなかったので、すべて対象外のままです`, {
+      showIgnored: true,
+    });
+  }
+
+  await supabase.from("email_messages").update({ status: "unparsed", error: null }).in("id", reopen);
   const result = await runParser();
-  backToList(result, { showIgnored: true });
+  backToList(
+    `対象外の ${ignored.length} 件を読み直し、利用通知だった ${reopen.length} 件を取り込みました（${result}）。` +
+      `残りの ${ignored.length - reopen.length} 件は対象外のままです`,
+    { showIgnored: true },
+  );
 }

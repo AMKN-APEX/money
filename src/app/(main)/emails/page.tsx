@@ -137,10 +137,10 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
         {(ignoredCount.count ?? 0) > 0 && (
           <form action={reparseIgnored}>
             <SubmitButton
-              pendingLabel="解析しています…"
+              pendingLabel="読み直しています…"
               className="mt-2 w-full rounded-lg border border-slate-700 py-2.5 text-xs text-slate-300"
             >
-              対象外の {ignoredCount.count} 件も解析し直す
+              対象外の {ignoredCount.count} 件に利用通知が無いか調べる
             </SubmitButton>
           </form>
         )}
