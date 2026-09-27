@@ -20,7 +20,7 @@
  *   - このカードは楽天証券の積立専用で、明細は月1行
  */
 import { toAmount } from "./csv";
-import { cellsOf } from "./pdf-lines";
+import { linesOf } from "./pdf-lines";
 import type { BankParser, ParseResult, ParsedRow } from "./types";
 
 const DATE = /^(\d{4})\/(\d{2})\/(\d{2})$/;
@@ -39,7 +39,7 @@ export const rakutenParser: BankParser = {
     if (!rakutenParser.looksLikeMine(text)) {
       return empty("楽天カードの請求明細書ではないようです");
     }
-    const lines = text.split("\n").map(cellsOf);
+    const lines = linesOf(text);
     const warnings: string[] = [];
 
     // 請求額は「〇〇年〇〇月ご請求金額」の次の行の先頭

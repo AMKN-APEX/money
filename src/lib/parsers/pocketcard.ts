@@ -26,7 +26,7 @@
  *     「ZOZOカード = 被服費」と決め打ちしてはいけない
  */
 import { toAmount } from "./csv";
-import { cellsOf } from "./pdf-lines";
+import { linesOf } from "./pdf-lines";
 import type { BankParser, ParseResult, ParsedRow } from "./types";
 
 const DATE = /^(\d{4})\/(\d{2})\/(\d{2})$/;
@@ -47,7 +47,7 @@ export const pocketcardParser: BankParser = {
     if (!pocketcardParser.looksLikeMine(text)) {
       return empty("ポケットカードの明細書ではないようです");
     }
-    const lines = text.split("\n").map(cellsOf);
+    const lines = linesOf(text);
     const warnings: string[] = [];
 
     // 「今回お支払期日」の見出しの次の行。末尾が期日、その手前が今回ご請求金額

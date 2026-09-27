@@ -84,6 +84,22 @@ test("ポケットカード: 割れた店名をつなぎ、請求額と支払期
   assert.deepEqual(r.statements, [{ paymentDate: "2026-09-01", amount: 13680 }]);
 });
 
+test("PDFの文字: フォーム送信で改行が \\r\\n になっても読める", () => {
+  // ブラウザからサーバーへ送ると改行が \r\n に置き換わる。
+  // 支払期日は行末にあるので、\r が残ると読めなくなっていた
+  const crlf = (name: string) => fixture(name).replace(/\r?\n/g, "\r\n");
+
+  const pocket = pocketcardParser.parse(crlf("pocketcard-statement-202609.txt"), "p.pdf", "2026-09-27");
+  assert.equal(pocket.error, null);
+  assert.deepEqual(pocket.warnings, []);
+  assert.deepEqual(pocket.statements, [{ paymentDate: "2026-09-01", amount: 13680 }]);
+  assert.equal(pocket.rows[0].merchant, "志なのすけ 枚方");
+
+  const rakuten = rakutenParser.parse(crlf("rakuten-202607.txt"), "r.pdf", "2026-09-27");
+  assert.equal(rakuten.error, null);
+  assert.deepEqual(rakuten.statements, [{ paymentDate: "2026-07-27", amount: 100000 }]);
+});
+
 test("ポケットカード: 明細の合計が請求額と合わなければ知らせる", () => {
   const broken = fixture("pocketcard-statement-202609.txt").replace(/^2026\/07\/15.*\n/m, "");
   const r = pocketcardParser.parse(broken, "pocketcard_2026_9.pdf", "2026-09-27");

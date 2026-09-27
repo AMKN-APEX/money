@@ -58,7 +58,14 @@ export function pagesToText(pages: PdfItem[][]): string {
   return pages.map((items) => itemsToLines(items).join("\n")).join("\n");
 }
 
-/** パーサー側で1行をセルに分ける */
-export function cellsOf(line: string): string[] {
-  return line.split("\t");
+/**
+ * パーサー側で、文字列を行とセルに分ける。
+ *
+ * **改行は `\r\n` になって届く。** ブラウザで作った文字列はフォームで送ると
+ * 改行が `\r\n` に置き換わる（multipart/form-data の決まり）。`\n` だけで割ると
+ * 行末のセルに `\r` が残り、行末に来る値（ポケットカードの支払期日）が読めなくなる。
+ * 実際に、ブラウザでの下見は通るのにサーバーでの取込だけが失敗した（2026-09-27）。
+ */
+export function linesOf(text: string): string[][] {
+  return text.split(/\r?\n/).map((line) => line.split("\t").map((cell) => cell.trim()));
 }
