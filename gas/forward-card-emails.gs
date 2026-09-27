@@ -45,7 +45,8 @@ var SENDERS = [
   'paypay-card.co.jp',    // PayPayカード
   'paypay-corp.co.jp',
   'pocketcard.co.jp',     // ポケットカード（ZOZOカード）※ pinf.pocketcard.co.jp も含む
-  'zozo.jp'
+  'zozo.jp',
+  'kyotobank.co.jp'       // 京都銀行（京銀ダイレクトの入金通知。給与の速報）
 ];
 
 /** 毎回さかのぼる日数。トリガーが数日止まっても取りこぼさない長さにする */

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { parserFor } from "../src/lib/parsers/email";
 import { smbcEmailParser } from "../src/lib/parsers/email/smbc";
 import { pocketcardEmailParser } from "../src/lib/parsers/email/pocketcard";
+import { kyotoEmailParser } from "../src/lib/parsers/email/kyoto";
 import { splitUsageKind, toDateTime, toYen } from "../src/lib/parsers/email/text";
 import { normalizeMerchant } from "../src/lib/normalize";
 import { classify, type Rule } from "../src/lib/rules";
@@ -273,4 +274,52 @@ test("重複排除: 人が決めた費目は上書きしない", () => {
   // まだ分類されていないものはCSV側の分類でよい
   assert.equal(keepsClassification(emailTx({ id: "a", status: "pending_review", category_id: null })), false);
   assert.equal(keepsClassification(emailTx({ id: "a", status: "confirmed", category_id: null })), false);
+});
+
+// ---------------------------------------------------------------- 京都銀行の入金通知
+
+test("京都銀行: 入金通知から日時・金額・内容を入金として読む", () => {
+  const r = kyotoEmailParser.parse(fixture("kyoto-deposit-email.txt"));
+  assert.equal(r.kind, "usage");
+  assert.equal(r.error, null);
+  assert.equal(normalizeMerchant(r.cardLabel), "京銀ダイレクトバンキング");
+  const u = r.usages[0];
+  assert.equal(u.date, "2026-09-25");
+  assert.equal(u.time, "01:05:58");
+  assert.equal(u.amount, 284988);
+  assert.equal(u.direction, "in");
+});
+
+test("京都銀行: 内容はCSVの摘要と同じ形に正規化され、給与のルールに当たる", () => {
+  const u = kyotoEmailParser.parse(fixture("kyoto-deposit-email.txt")).usages[0];
+  // CSV では ﾊﾟﾅｿﾆﾂｸｲﾝﾀﾞｽﾄﾘ-(ｶ。メールは全角で長音が ―。同じ形になればCSV取込で上書きされる
+  assert.equal(normalizeMerchant(u.matchText), normalizeMerchant("ﾊﾟﾅｿﾆﾂｸｲﾝﾀﾞｽﾄﾘ-(ｶ"));
+
+  const salary: Rule = {
+    id: "r1",
+    priority: 10,
+    match_type: "prefix",
+    pattern: "パナソニツクインダストリー",
+    account_id: "kyoto",
+    set_type: "income",
+    category_id: "salary",
+    to_account_id: null,
+    channel: "bank",
+    memo_template: null,
+    is_active: true,
+  };
+  const cls = classify({ matchText: u.matchText, direction: "in" }, "kyoto", [salary]);
+  assert.equal(cls.type, "income");
+  assert.equal(cls.category_id, "salary");
+});
+
+test("京都銀行: 入金通知でないメールは対象外", () => {
+  const r = kyotoEmailParser.parse(
+    "いつも京銀ダイレクトバンキングをご利用いただきありがとうございます。\nログインがありました。",
+  );
+  assert.equal(r.kind, "other");
+});
+
+test("京都銀行: 差出人で担当が決まる", () => {
+  assert.equal(parserFor("京都銀行 <info@kyotobank.co.jp>")?.id, "kyoto");
 });

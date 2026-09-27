@@ -14,6 +14,11 @@ export type ParsedUsage = {
   time: string | null;
   /** 正の整数（円） */
   amount: number;
+  /**
+   * 口座から見た向き。省略時は out（カードの利用）。
+   * 銀行の入金通知だけが in になる
+   */
+  direction?: "in" | "out";
   /** 画面に出す利用先。ポケットカードのように出ない会社もある */
   merchant: string;
   /** ルール照合にかける文字列（正規化前） */
@@ -29,7 +34,7 @@ export type ParsedUsage = {
   dedupSeed: string;
 };
 
-export type EmailParserId = "smbc" | "pocketcard";
+export type EmailParserId = "smbc" | "pocketcard" | "kyoto";
 
 export type EmailParseResult = {
   /**

@@ -216,14 +216,15 @@ async function saveUsage(
     return { transactionId: (existing as { id: string }).id, duplicated: true, pendingReview: false, error: null };
   }
 
-  const cls = classify({ matchText: usage.matchText, direction: "out" }, account.id, rules);
+  const direction = usage.direction ?? "out";
+  const cls = classify({ matchText: usage.matchText, direction }, account.id, rules);
 
   let type: TxType = cls.type;
   let toAccountId = cls.to_account_id;
   let memo = joinMemo(usage.memo, cls.memo);
   // 振替と分かっても相手口座が決まらないものは保留にする（CSV取込と同じ扱い）
   if (type === "transfer" && !toAccountId) {
-    type = "expense";
+    type = direction === "in" ? "income" : "expense";
     toAccountId = null;
     memo = joinMemo(memo, "振替の可能性あり（相手口座を特定できませんでした）");
   }

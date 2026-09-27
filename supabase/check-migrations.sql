@@ -23,5 +23,7 @@ select
   exists(select 1 from col where column_name = 'card_patterns')          as "0923_02_vpass",
   exists(select 1 from rules where pattern = 'エルピオ')         as "0923_03_vpass_rules",
   to_regclass('public.card_statements') is not null            as "0927_01_card_statements",
+  exists(select 1 from rules where pattern = 'MACHICON')         as "0927_02_classify_pending",
+  exists(select 1 from accounts where '京銀ダイレクト' = any(card_patterns)) as "0927_03_kyoto_email",
   -- true なら 0923_02 が途中で止まっている（本来は消える列）
   exists(select 1 from col where column_name = 'email_card_pattern')     as "旧列が残っている";
