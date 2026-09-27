@@ -3,10 +3,6 @@ import { loadAnalysis } from "@/lib/analysis-data";
 import { averageByCategory, topMerchants } from "@/lib/spending";
 import { isYearMonth, monthRange, todayJst, yen } from "@/lib/format";
 import { MonthlyBars } from "@/components/monthly-bars";
-import { AiAnalysis } from "@/components/ai-analysis";
-
-// AI の分析（Server Action）は30秒前後かかる。既定の制限で切られないよう延ばす
-export const maxDuration = 120;
 
 /** 3ヶ月平均との差を「▲ +1,234円」の形で。色だけに頼らず記号と符号も付ける */
 function Delta({ diff }: { diff: number }) {
@@ -165,7 +161,7 @@ export default async function AnalysisPage({ searchParams }: PageProps<"/analysi
 
       {/* お金を使った店 */}
       {merchants.length > 0 && (
-        <section className="mt-6">
+        <section className="mt-6 mb-4">
           <h2 className="mb-2 text-sm font-semibold text-slate-400">よく使った店</h2>
           <ul className="divide-y divide-slate-800 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 text-sm">
             {merchants.map((m) => (
@@ -180,12 +176,6 @@ export default async function AnalysisPage({ searchParams }: PageProps<"/analysi
           </ul>
         </section>
       )}
-
-      {/* AI の分析 */}
-      <section className="mt-6 mb-4">
-        <h2 className="mb-2 text-sm font-semibold text-slate-400">AIの分析</h2>
-        <AiAnalysis ym={ym} label={month.label} />
-      </section>
     </>
   );
 }
