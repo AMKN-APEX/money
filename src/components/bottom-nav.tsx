@@ -4,16 +4,17 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 /**
- * メール速報は毎日動くのに設定の奥に埋まっていて、開くまでの手数が多かった。
- * 6つ並ぶので文字は小さめにする。
+ * 取込とメール速報は設定から開く（2026-09-27 本人の希望）。
+ * メールは自動で取り込まれるようになり、取込も月1回なので、下の欄に置くほどではなくなった。
+ * 空いた場所に、毎日見たい「分析」を置く。
  */
 const TABS = [
-  { href: "/", label: "ホーム" },
-  { href: "/transactions", label: "取引" },
-  { href: "/emails", label: "メール" },
-  { href: "/accounts", label: "口座" },
-  { href: "/import", label: "取込" },
-  { href: "/settings", label: "設定" },
+  { href: "/", label: "ホーム", also: [] },
+  { href: "/transactions", label: "取引", also: [] },
+  { href: "/analysis", label: "分析", also: [] },
+  { href: "/accounts", label: "口座", also: [] },
+  // 設定から開く画面にいるあいだは「設定」を選択中にする
+  { href: "/settings", label: "設定", also: ["/import", "/emails", "/review"] },
 ] as const;
 
 export function BottomNav() {
@@ -24,7 +25,9 @@ export function BottomNav() {
       <ul className="mx-auto flex max-w-2xl">
         {TABS.map((tab) => {
           const active =
-            tab.href === "/" ? pathname === "/" : pathname.startsWith(tab.href);
+            tab.href === "/"
+              ? pathname === "/"
+              : [tab.href, ...tab.also].some((p) => pathname.startsWith(p));
           return (
             <li key={tab.href} className="flex-1">
               <Link

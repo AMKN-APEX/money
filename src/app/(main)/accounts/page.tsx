@@ -35,8 +35,10 @@ export default async function AccountsPage() {
     );
   }
 
-  const accounts = (accountsRes.data ?? []) as Account[];
-  const byId = new Map(accounts.map((a) => [a.id, a]));
+  const allAccounts = (accountsRes.data ?? []) as Account[];
+  // 止めた口座（PayPay残高など）は出さない。引落口座の名前を引くためだけに全件を持つ
+  const accounts = allAccounts.filter((a) => a.is_active);
+  const byId = new Map(allAccounts.map((a) => [a.id, a]));
   const balances = new Map(
     ((balanceRes.data ?? []) as { account_id: string; balance: number }[]).map((b) => [
       b.account_id,
@@ -87,7 +89,6 @@ export default async function AccountsPage() {
                         <span className="block truncate font-medium">{a.name}</span>
                         <span className="mt-0.5 block text-xs text-slate-500">
                           {ACCOUNT_TYPE_LABEL[a.type]}
-                          {!a.is_active && "・停止中"}
                         </span>
                       </span>
                       <span
