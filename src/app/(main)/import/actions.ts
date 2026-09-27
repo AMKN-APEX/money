@@ -141,13 +141,32 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
   if (ruleError) return fail(`ルールを読めませんでした: ${ruleError.message}`);
   const rules = (ruleRows ?? []) as unknown as Rule[];
 
+  // カードの返品・払い戻しを受ける収入の費目（migration 20260927000005）
+  const { data: refundRow } = await supabase
+    .from("categories")
+    .select("id")
+    .eq("name", "返金")
+    .eq("kind", "income")
+    .is("parent_id", null)
+    .maybeSingle();
+  const refundCategoryId = (refundRow as { id: string } | null)?.id ?? null;
+
   // カード明細は請求ごとの1枚で、利用の無い月はファイル自体が無い。
   // 利用日の間が空いていても取り逃しではないので、未取込期間の警告は出さない
   const checkGap = !parsed.statements || parsed.statements.length === 0;
 
   const summaries: AccountSummary[] = [];
   for (const group of grouped.groups) {
-    const result = await importGroup(supabase, group, rules, filename, fileHash, warnings, checkGap);
+    const result = await importGroup(
+      supabase,
+      group,
+      rules,
+      filename,
+      fileHash,
+      warnings,
+      checkGap,
+      refundCategoryId,
+    );
     if ("error" in result) return fail(result.error);
     summaries.push(result.summary);
   }
@@ -250,6 +269,7 @@ async function importGroup(
   fileHash: string,
   warnings: string[],
   checkGap: boolean,
+  refundCategoryId: string | null,
 ): Promise<{ summary: AccountSummary } | { error: string }> {
   const { account, rows } = group;
   const dates = rows.map((r) => r.date).sort();
@@ -318,6 +338,21 @@ async function importGroup(
     let toAccountId = cls.to_account_id;
     let status: "confirmed" | "pending_review" = cls.ruleId ? "confirmed" : "pending_review";
     let memo = joinMemo(row.memo ?? null, cls.memo);
+    let categoryId = cls.category_id;
+
+    // カードの返品・払い戻し。店のルール（JR九州 → 交通費 など）は支出として書かれているので、
+    // そのまま当てると払い戻しが支出に数えられてしまう。収入の「返金」にする
+    // ルールの無い店でも、カードに入ってくるお金は返品と考えてよい（キャッシュバックは専用のルールがある）
+    if (
+      row.direction === "in" &&
+      account.type === "credit_card" &&
+      (type === "expense" || !cls.ruleId)
+    ) {
+      type = "income";
+      categoryId = refundCategoryId;
+      status = refundCategoryId ? "confirmed" : "pending_review";
+      memo = joinMemo(memo, "返品・払い戻し");
+    }
 
     // 9.3: 振替と分かっても相手口座を特定できない場合がある
     // （三井住友カード2枚が同じ摘要になる）。保留にして人に決めてもらう。
@@ -365,7 +400,7 @@ async function importGroup(
             : {
                 type,
                 to_account_id: toAccountId,
-                category_id: cls.category_id,
+                category_id: categoryId,
                 channel: cls.channel,
                 status,
               }),
@@ -383,7 +418,7 @@ async function importGroup(
       type,
       account_id: account.id,
       to_account_id: toAccountId,
-      category_id: cls.category_id,
+      category_id: categoryId,
       merchant: row.merchant || null,
       merchant_normalized: normalizeMerchant(row.matchText) || null,
       channel: cls.channel,

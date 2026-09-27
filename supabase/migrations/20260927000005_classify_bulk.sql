@@ -9,8 +9,16 @@
 --   - 薬局は、病院の帰りに寄ったと思われる調剤薬局（エイト薬局）を「医療」、
 --     ドラッグストア（スギ薬局）を「日用品」
 --
--- 推測しないもの（未分類に残す）:
---   インターネット振込 270,000円（楽天証券への入金）/ キンタ / カデイアツク
+-- 本人の指摘で直したもの（2026-09-27）:
+--   - プレミアムウォーターはサブスク / 天満産直市場・ぎゃらりぃ栞屋・京橋ホールは飲み屋なので交際費
+--   - 鳥貴族はひとりで行くこともあるのでルールにしない（今ある1件は金額から交際費）
+--   - 「コンビニ」を「コンビニ・自販機」に改名 / キンタは外食 / カデイアツクは関空の自販機
+--   - ヤマザキタケル 36,305円は会社の経費精算（Claude.ai の料金の立替）
+--   - インターネット振込 270,000円は楽天証券への入金（振替）
+--   - カードの返品・払い戻しは収入の「返金」（JR九州の払い戻しなど）
+--
+-- 注意: 「コンビニ」の改名により、20260923000004 / 20260927000002 を流し直すと
+--   旧名の費目を作り直したり、見つからずに止まったりする。流し直さないこと。
 --
 -- 「ミツイスミトモカード」の引落は、摘要でAmazonカードとデビュープラスを区別できない（9.3）。
 -- 請求（card_statements）と金額・日付で突き合わせ、1枚に決まるものだけ振替にする。
@@ -42,6 +50,18 @@ begin
   values (uid, null, 'ポイント還元', 'income', 240, false)
   on conflict do nothing;
 
+  -- カードの返品・払い戻し。店のルールは支出なので、返品に当てると支出に数えられてしまう
+  insert into categories (user_id, parent_id, name, kind, sort_order, is_extraordinary)
+  values (uid, null, '返金', 'income', 235, false)
+  on conflict do nothing;
+
+  -- 自販機もここに入れるので名前を変える
+  update categories c
+     set name = 'コンビニ・自販機'
+    from categories p
+   where p.id = c.parent_id and p.name = '食費'
+     and c.user_id = uid and c.name = 'コンビニ';
+
   -- pattern は normalizeMerchant() を通した形。長いものから当てる
   create temp table bulk_map (
     pattern     text primary key,
@@ -65,7 +85,7 @@ begin
     ('CLAUDE.AI', 'サブスク', 'その他', 'expense', true, false),
     ('AMAZONプライム会費', 'サブスク', 'その他', 'expense', true, false),
     ('GITHUB', 'サブスク', 'その他', 'expense', true, false),
-    ('プレミアムウオーター', '食費', '食料品', 'expense', true, false),
+    ('プレミアムウオーター', 'サブスク', 'その他', 'expense', true, false),
     ('サイゼリヤ', '食費', '外食', 'expense', true, false),
     ('クラズシ', '食費', '外食', 'expense', true, false),
     ('マクドナルド', '食費', '外食', 'expense', true, false),
@@ -95,22 +115,22 @@ begin
     ('スターバツクス', '食費', 'カフェ', 'expense', true, false),
     ('ラコリーナ', '食費', 'カフェ', 'expense', true, false),
     ('SIZUYA', '食費', 'カフェ', 'expense', true, false),
-    ('ミニストツプ', '食費', 'コンビニ', 'expense', true, false),
-    ('もより市', '食費', 'コンビニ', 'expense', true, false),
-    ('キヨスク', '食費', 'コンビニ', 'expense', true, false),
-    ('JRーPLUS', '食費', 'コンビニ', 'expense', true, false),
-    ('コカ・コーラ', '食費', 'コンビニ', 'expense', true, false),
-    ('飲料自販機', '食費', 'コンビニ', 'expense', true, false),
-    ('カンサイコーヒー', '食費', 'コンビニ', 'expense', true, false),
-    ('SSIYU', '食費', 'コンビニ', 'expense', true, false),
-    ('ZIES25', '食費', 'コンビニ', 'expense', true, false),
+    ('ミニストツプ', '食費', 'コンビニ・自販機', 'expense', true, false),
+    ('もより市', '食費', 'コンビニ・自販機', 'expense', true, false),
+    ('キヨスク', '食費', 'コンビニ・自販機', 'expense', true, false),
+    ('JRーPLUS', '食費', 'コンビニ・自販機', 'expense', true, false),
+    ('コカ・コーラ', '食費', 'コンビニ・自販機', 'expense', true, false),
+    ('飲料自販機', '食費', 'コンビニ・自販機', 'expense', true, false),
+    ('カンサイコーヒー', '食費', 'コンビニ・自販機', 'expense', true, false),
+    ('SSIYU', '食費', 'コンビニ・自販機', 'expense', true, false),
+    ('ZIES25', '食費', 'コンビニ・自販機', 'expense', true, false),
     ('ダイニー', '交際費', null, 'expense', true, false),
     ('屋台酒場おおきに', '交際費', null, 'expense', true, false),
     ('コダワリニクサカバ', '交際費', null, 'expense', true, false),
     ('炭火焼鳥権兵衛', '交際費', null, 'expense', true, false),
     ('ミライザカ', '交際費', null, 'expense', true, false),
     ('塚田農場', '交際費', null, 'expense', true, false),
-    ('鳥貴族', '交際費', null, 'expense', true, false),
+    ('鳥貴族', '交際費', null, 'expense', false, false),
     ('北海道秋葉原', '交際費', null, 'expense', true, false),
     ('バクダンヤ', '交際費', null, 'expense', true, false),
     ('株式会社ス*スペースマーケツト', '交際費', null, 'expense', true, false),
@@ -173,21 +193,23 @@ begin
     ('業務スーパー', 'その他', null, 'expense', true, false),
     ('ライフ寝屋川', 'その他', null, 'expense', true, false),
     ('ダイエー', 'その他', null, 'expense', true, false),
-    ('ラクテンペイテンマサンチヨクイチバ', 'その他', null, 'expense', true, false),
+    ('ラクテンペイテンマサンチヨクイチバ', '交際費', null, 'expense', true, false),
     ('ギフトキヨスク', 'その他', null, 'expense', true, false),
     ('えびせんホワイテイ', 'その他', null, 'expense', true, false),
     ('大江ノ郷', 'その他', null, 'expense', true, false),
-    ('ぎゃらりぃ栞屋', 'その他', null, 'expense', true, false),
+    ('ぎゃらりぃ栞屋', '交際費', null, 'expense', true, false),
     ('門真運転免許', 'その他', null, 'expense', true, false),
-    ('京橋ホール', 'その他', null, 'expense', true, false),
+    ('京橋ホール', '交際費', null, 'expense', true, false),
     ('給与', '給与', null, 'income', true, true),
-    ('振込ヤマザキタケル', '送金受取・立替精算', null, 'income', false, true),
+    ('振込ヤマザキタケル', '経費精算', null, 'income', false, true),
     ('ことらモリモトコウヘイ', '送金受取・立替精算', null, 'income', false, true),
     ('カードセブンギンコウ', '現金引出', null, 'expense', false, true),
     ('カード', '現金引出', null, 'expense', false, true),
     ('手数料', '手数料', null, 'expense', true, true),
     ('料金', '手数料', null, 'expense', true, true),
-    ('キヤツシユバツク', 'ポイント還元', null, 'income', true, false)
+    ('キヤツシユバツク', 'ポイント還元', null, 'income', true, false),
+    ('キンタ', '食費', '外食', 'expense', true, false),
+    ('カデイアツク', '食費', 'コンビニ・自販機', 'expense', true, false)
 ;
 
   update bulk_map m
@@ -245,5 +267,29 @@ begin
            where s2.account_id in (amazon, debut)
              and s2.amount = t.amount
              and abs(s2.payment_date - t.date) <= 7) = 1;
+
+  -- 楽天証券への入金（NISA満額用。design.md 9.2）
+  update transactions t
+     set type = 'transfer',
+         to_account_id = (select id from accounts where user_id = uid and name = '楽天証券'),
+         category_id = (select c.id from categories c join categories p on p.id = c.parent_id
+                         where c.user_id = uid and p.name = '振替' and c.name = '投資'),
+         status = 'confirmed'
+   where t.user_id = uid
+     and t.status = 'pending_review'
+     and starts_with(t.merchant_normalized, 'インターネツトフリコミ')
+     and t.amount = 270000 and t.date = '2026-09-06';
+
+  -- カードの返品・払い戻し。明細の金額がマイナスの行は、重複判定キーの金額にマイナスが残っている
+  -- （例: …:ＪＲ九州列車予約サービス:-1970:1）。支出として確定済みのものも直す
+  update transactions t
+     set type = 'income', to_account_id = null, status = 'confirmed',
+         category_id = (select id from categories where user_id = uid and parent_id is null and name = '返金')
+    from accounts a
+   where a.id = t.account_id and a.type = 'credit_card'
+     and t.user_id = uid
+     and t.source = 'csv'
+     and t.dedup_key ~ ':-[0-9]+:[0-9]+$'
+     and not starts_with(coalesce(t.merchant_normalized, ''), 'キヤツシユバツク');
 end;
 $bulk$;
