@@ -24,9 +24,12 @@
  *   - **返品がマイナス金額で出る**（`-1970` / 備考「返品」）
  *   - 海外利用は末尾にまとめられ、日付順に並ばない。備考にレートが入る
  *   - 数字以外はほぼ全角。正規化は normalizeMerchant() 側で行う
+ *   - **支払日がファイルのどこにも無い。** ファイル名 `202609.csv`（`202609 (1).csv`）が
+ *     請求月なので、その月の26日（三井住友の引落日）を支払日とする。
+ *     休日で後ろにずれる分は、引落との照合で幅を持たせて吸収する
  */
 import { parseCsv, toAmount } from "./csv";
-import type { BankParser, ParseResult, ParsedRow } from "./types";
+import type { BankParser, ParseResult, ParsedRow, StatementBill } from "./types";
 
 const COL = {
   date: 0,
@@ -41,10 +44,13 @@ const COL = {
 /** カード見出し行の2列目。`4980-03**-****-****` */
 const MASKED_NUMBER = /^\d{4}-\d{2}\*{2}-\*{4}-\*{4}$/;
 const DATE = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/;
+/** 三井住友カードの引落日（毎月26日） */
+const PAYMENT_DAY = "26";
 
 export const vpassParser: BankParser = {
   id: "vpass",
   accountSource: "file",
+  format: "csv",
   label: "三井住友カード（Vpass）",
 
   looksLikeMine(text) {
@@ -52,7 +58,7 @@ export const vpassParser: BankParser = {
     return parseCsv(text).some((row) => MASKED_NUMBER.test((row[1] ?? "").trim()));
   },
 
-  parse(text): ParseResult {
+  parse(text, filename): ParseResult {
     const table = parseCsv(text).filter((r) => r.some((c) => c.trim() !== ""));
     if (table.length === 0) return empty("ファイルが空です");
     if (!table.some((row) => MASKED_NUMBER.test((row[1] ?? "").trim()))) {
@@ -140,9 +146,26 @@ export const vpassParser: BankParser = {
       );
     }
 
+    // 1ファイル = 1枚のカードの1回の請求（iD はデビュープラスの請求に含まれる）
+    const statements: StatementBill[] = [];
+    const month = filename.match(/^(\d{4})(\d{2})(?:\D|$)/);
+    if (month && billedTotal !== null && billedTotal > 0) {
+      statements.push({
+        paymentDate: `${month[1]}-${month[2]}-${PAYMENT_DAY}`,
+        amount: billedTotal,
+        cardLabel: rows[0].cardLabel,
+      });
+    } else if (!month) {
+      warnings.push(
+        "ファイル名から請求月を読めませんでした（`202609.csv` の形を想定）。" +
+          "引落との照合に使う請求は記録しません。",
+      );
+    }
+
     const dates = rows.map((r) => r.date).sort();
     return {
       rows,
+      statements,
       periodFrom: dates[0],
       periodTo: dates[dates.length - 1],
       warnings,

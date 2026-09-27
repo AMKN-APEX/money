@@ -58,3 +58,6 @@ supabase/.temp/
 
 # プロンプトを書くだけの一時ファイル
 memo.md
+
+# pdfjs の worker と cmaps（scripts/copy-pdfjs.mjs が生成）
+/public/pdfjs/

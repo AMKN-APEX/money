@@ -34,6 +34,7 @@ const COL = {
 export const yuchoParser: BankParser = {
   id: "yucho",
   accountSource: "user",
+  format: "csv",
   label: "ゆうちょ銀行（ゆうちょダイレクト）",
 
   looksLikeMine(text) {

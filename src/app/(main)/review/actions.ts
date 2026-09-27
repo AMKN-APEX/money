@@ -47,7 +47,7 @@ export async function resolvePending(formData: FormData) {
     })
     .eq("id", id);
 
-  if (learn && current.merchant_normalized) {
+  if (learn && current.merchant_normalized && !isPlaceholderMerchant(current.merchant_normalized)) {
     await learnRule(supabase, {
       pattern: current.merchant_normalized,
       accountId: current.account_id,
@@ -58,6 +58,15 @@ export async function resolvePending(formData: FormData) {
   }
 
   revalidatePath("/", "layout");
+}
+
+/**
+ * 店名の代わりに入る決まり文句か。
+ * ポケットカードの利用通知は店名を出さず「ポケットカード加盟店」等しか入らない（13章）。
+ * これをルールとして覚えると、そのカードの以後の利用がすべて同じ費目になる。
+ */
+function isPlaceholderMerchant(normalized: string): boolean {
+  return normalized.endsWith("加盟店") || normalized.endsWith("キヤツシング");
 }
 
 async function learnRule(

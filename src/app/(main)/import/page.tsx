@@ -33,14 +33,15 @@ export default async function ImportPage() {
   const batches = (batchesRes.data ?? []) as Batch[];
   const accountName = new Map(accounts.map((a) => [a.id, a.name]));
 
-  // CSVを取り込むのは入出金のある口座だけ
-  const importable = accounts.filter((a) => a.type === "bank" || a.type === "emoney");
+  // 証券口座は明細を取り込まない（積立は銀行・カード側の振替として入る）
+  const importable = accounts.filter((a) => a.type !== "securities");
 
   return (
     <>
       <h1 className="text-xl font-bold">CSV取込</h1>
       <p className="mt-1 text-sm text-slate-400">
-        京都銀行とゆうちょ銀行に対応しています
+        京都銀行・ゆうちょ銀行・三井住友カード・PayPayカードのCSVと、
+        楽天カード・ZOZOカードのPDFに対応しています
       </p>
 
       {reminders.length > 0 && (

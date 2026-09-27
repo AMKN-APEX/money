@@ -28,8 +28,27 @@ export type ParsedRow = {
   memo?: string | null;
 };
 
+/**
+ * カード明細1枚ぶんの請求。支払日にこの額が引き落とされる。
+ *
+ * 銀行CSVは2〜3ヶ月しか遡れないため、それより前の引落はアプリに入らない。
+ * カードの利用だけを遡って取り込むと、払ったはずの額が未払いとして残高に
+ * 積み上がる。請求を記録しておき、対応する引落が無いものは「アプリの外で
+ * 払い済み」として開始残高に入れる（src/lib/card-statements.ts）。
+ */
+export type StatementBill = {
+  /** YYYY-MM-DD。休日で後ろにずれることがあるので、照合は前後に幅を持たせる */
+  paymentDate: string;
+  /** 請求額（円） */
+  amount: number;
+  /** どのカードの請求か。1ファイルに複数カードが入る形式（Vpass）でだけ使う */
+  cardLabel?: string | null;
+};
+
 export type ParseResult = {
   rows: ParsedRow[];
+  /** カード明細の請求。銀行CSVでは空 */
+  statements?: StatementBill[];
   periodFrom: string | null;
   periodTo: string | null;
   /** 致命的ではないが利用者に見せたい注意 */
@@ -38,11 +57,16 @@ export type ParseResult = {
   error: string | null;
 };
 
-export type ParserId = "kyoto" | "yucho" | "vpass";
+export type ParserId = "kyoto" | "yucho" | "vpass" | "paypaycard" | "rakuten" | "pocketcard";
 
 export type BankParser = {
   id: ParserId;
   label: string;
+  /**
+   * 何のファイルを受け付けるか。pdf はブラウザで文字を取り出してから
+   * （src/lib/parsers/pdf-lines.ts）パーサーにかける
+   */
+  format: "csv" | "pdf";
   /**
    * 取り込み先の口座をどう決めるか。
    *   user … 利用者が選ぶ（銀行CSV。ファイルに口座の手がかりが無い）

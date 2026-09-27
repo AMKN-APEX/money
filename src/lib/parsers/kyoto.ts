@@ -26,6 +26,7 @@ const COL = {
 export const kyotoParser: BankParser = {
   id: "kyoto",
   accountSource: "user",
+  format: "csv",
   label: "京都銀行（京銀ダイレクト）",
 
   looksLikeMine(text) {
