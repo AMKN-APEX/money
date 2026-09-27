@@ -19,6 +19,12 @@ export type AnalysisData = {
   summaries: MonthSummary[];
   rows: SpendingRow[];
   categories: Category[];
+  /**
+   * 収入が記録されている最初の日。給料は銀行に振り込まれるので、銀行CSVの取込範囲の
+   * いちばん古い日になる。カードの明細は15ヶ月以上遡れるのに銀行は2〜3ヶ月しか遡れないため、
+   * それより前の月は支出だけあって収入が無い。0円と出すと赤字に見えるので「記録なし」と出す
+   */
+  incomeFrom: string | null;
   error: string | null;
 };
 
@@ -34,7 +40,7 @@ export async function loadAnalysis(ym: string): Promise<AnalysisData> {
     .from("categories")
     .select(CATEGORY_COLUMNS)
     .order("sort_order");
-  if (catError) return { months, summaries: [], rows: [], categories: [], error: catError.message };
+  if (catError) return { months, summaries: [], rows: [], categories: [], incomeFrom: null, error: catError.message };
   const categories = (catData ?? []) as Category[];
 
   const rows: SpendingRow[] = [];
@@ -48,11 +54,30 @@ export async function loadAnalysis(ym: string): Promise<AnalysisData> {
       .order("date")
       .order("id")
       .range(offset, offset + PAGE - 1);
-    if (error) return { months, summaries: [], rows: [], categories, error: error.message };
+    if (error) return { months, summaries: [], rows: [], categories, incomeFrom: null, error: error.message };
     const page = (data ?? []) as SpendingRow[];
     rows.push(...page.map((r) => ({ ...r, amount: Number(r.amount) })));
     if (page.length < PAGE) break;
   }
 
-  return { months, summaries: summarizeMonths(rows, categories, months), rows, categories, error: null };
+  // 銀行口座の取込範囲のうち、いちばん古い日
+  const [{ data: banks }, { data: coverage }] = await Promise.all([
+    supabase.from("accounts").select("id").eq("type", "bank"),
+    supabase.from("import_coverage").select("account_id, covered_from"),
+  ]);
+  const bankIds = new Set(((banks ?? []) as { id: string }[]).map((b) => b.id));
+  const incomeFrom =
+    ((coverage ?? []) as { account_id: string; covered_from: string | null }[])
+      .filter((c) => bankIds.has(c.account_id) && c.covered_from)
+      .map((c) => c.covered_from as string)
+      .sort()[0] ?? null;
+
+  return {
+    months,
+    summaries: summarizeMonths(rows, categories, months),
+    rows,
+    categories,
+    incomeFrom,
+    error: null,
+  };
 }

@@ -47,6 +47,9 @@ export default async function AnalysisPage({ searchParams }: PageProps<"/analysi
   const merchants = topMerchants(data.rows, data.categories, ym);
   const colors = assignColors((latest ?? data).summaries);
   const partial = ym === thisMonth;
+  // 銀行CSVが無い月は収入が分からない（その月の最終日までに銀行の記録が始まっていれば記録あり）
+  const incomeKnown = (m: string) => data.incomeFrom !== null && data.incomeFrom <= monthRange(m).to;
+  const known = incomeKnown(ym);
 
   const bars = data.summaries.map((m) => ({
     ym: m.ym,
@@ -95,20 +98,33 @@ export default async function AnalysisPage({ searchParams }: PageProps<"/analysi
         <dl className="mt-2 grid grid-cols-2 gap-2 text-xs">
           <div className="rounded-xl bg-slate-950/60 p-2.5">
             <dt className="text-slate-500">収入</dt>
-            <dd className="mt-0.5 text-sm tabular-nums">{yen(current.income)}</dd>
+            <dd className="mt-0.5 text-sm tabular-nums">
+              {known ? yen(current.income) : <span className="text-slate-500">記録なし</span>}
+            </dd>
           </div>
           <div className="rounded-xl bg-slate-950/60 p-2.5">
             <dt className="text-slate-500">収支（収入 − 支出）</dt>
-            <dd
-              className={`mt-0.5 text-sm tabular-nums ${
-                current.income - current.expense < 0 ? "text-rose-400" : "text-emerald-400"
-              }`}
-            >
-              {current.income - current.expense < 0 ? "▼ " : "▲ "}
-              {yen(current.income - current.expense)}
-            </dd>
+            {known ? (
+              <dd
+                className={`mt-0.5 text-sm tabular-nums ${
+                  current.income - current.expense < 0 ? "text-rose-400" : "text-emerald-400"
+                }`}
+              >
+                {current.income - current.expense < 0 ? "▼ " : "▲ "}
+                {yen(current.income - current.expense)}
+              </dd>
+            ) : (
+              <dd className="mt-0.5 text-sm text-slate-500">—</dd>
+            )}
           </div>
         </dl>
+        {!known && (
+          <p className="mt-2 text-xs text-slate-500">
+            給料が振り込まれる銀行の明細は
+            {data.incomeFrom ? `${Number(data.incomeFrom.slice(5, 7))}月${Number(data.incomeFrom.slice(8))}日` : "まだ"}
+            からしか取り込めていないため、この月の収入は分かりません。
+          </p>
+        )}
         {current.extraordinary !== 0 && (
           <p className="mt-3 text-xs text-slate-500">別枠（特別支出・経費精算）: {yen(current.extraordinary)}</p>
         )}
@@ -172,7 +188,9 @@ export default async function AnalysisPage({ searchParams }: PageProps<"/analysi
                   <tr key={m.ym} className="border-t border-slate-800">
                     <td className="py-1">{monthRange(m.ym).label}</td>
                     <td className="py-1 text-right text-slate-200">{yen(m.expense)}</td>
-                    <td className="py-1 text-right">{yen(m.income)}</td>
+                    <td className="py-1 text-right">
+                      {incomeKnown(m.ym) ? yen(m.income) : <span className="text-slate-600">記録なし</span>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
