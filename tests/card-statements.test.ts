@@ -189,3 +189,39 @@ test("開始残高: 同額の請求が続いても、1件の引落を2度使わ�
   assert.equal(r.amount, 100000);
   assert.equal(r.statements[0].paymentDate, "2026-07-27");
 });
+
+// ---------------------------------------------------------------- Vpass の変わった行
+
+const VPASS_HEAD = "山田　太郎　様,4980-03**-****-****,三井住友カードデビュープラスＶＩＳＡ\r\n";
+
+test("Vpass: 店名に囲まれていないカンマがあっても列を取り違えない", () => {
+  const csv =
+    VPASS_HEAD +
+    "2025/08/27,GITHUB, INC. (GITHUB.COM ),1687,１,１,1687,11.00　USD　153.434　08 28\r\n" +
+    ",,,,,1687,\r\n";
+  const r = vpassParser.parse(csv, "202509.csv", "2026-09-27");
+  assert.deepEqual(r.warnings, []);
+  assert.equal(r.rows[0].merchant, "GITHUB, INC. (GITHUB.COM )");
+  assert.equal(r.rows[0].amount, 1687);
+  assert.equal(r.rows[0].memo, "11.00　USD　153.434　08 28");
+});
+
+test("Vpass: 利用金額が空のキャッシュバックは当月支払額のマイナスで読む", () => {
+  const csv =
+    VPASS_HEAD +
+    "2025/11/30,モバイルＩＣＯＣＡチャージ,5000,１,１,5000,\r\n" +
+    "2025/11/30,キャッシュバック（ポイント交換）,,,,-7800,\r\n" +
+    ",,,,,-2800,\r\n";
+  const r = vpassParser.parse(csv, "202512.csv", "2026-09-27");
+  assert.deepEqual(r.warnings, []);
+  assert.equal(r.rows[1].amount, 7800);
+  assert.equal(r.rows[1].direction, "in");
+});
+
+test("Vpass: 確定前の明細は取り込まず、理由を返す", () => {
+  const csv = "2026/9/24,ユニクロ・ＧＵ・ＰＬＳＴオンライン,ご本人,1回払い,,'26/10,9980,9980,,,,,\r\n";
+  assert.equal(vpassParser.looksLikeMine(csv), true);
+  const r = vpassParser.parse(csv, "202610.csv", "2026-09-27");
+  assert.equal(r.rows.length, 0);
+  assert.match(r.error ?? "", /確定前/);
+});

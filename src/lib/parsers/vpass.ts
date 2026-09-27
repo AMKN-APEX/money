@@ -24,6 +24,13 @@
  *   - **返品がマイナス金額で出る**（`-1970` / 備考「返品」）
  *   - 海外利用は末尾にまとめられ、日付順に並ばない。備考にレートが入る
  *   - 数字以外はほぼ全角。正規化は normalizeMerchant() 側で行う
+ *   - **店名のカンマが囲まれていない。** `GITHUB, INC. (GITHUB.COM )` のように
+ *     店名にカンマがあると列が1つずれる（2025年9月請求で確認）。列の位置は決め打ちせず、
+ *     「利用金額」と、その3つ右の「当月支払額」がどちらも数字になる位置を探す
+ *   - **利用金額が空の行がある。** ポイントのキャッシュバックは当月支払額だけに
+ *     マイナスで入る（`キャッシュバック（ポイント交換）,,,,,-7800,`）。当月支払額で読む
+ *   - **確定前の明細は別の形式で落ちてくる**（`202610.csv`。カード見出し行が無く、
+ *     列も違う）。どのカードの明細か分からず、確定後の明細と重複するため取り込まない
  *   - **支払日がファイルのどこにも無い。** ファイル名 `202609.csv`（`202609 (1).csv`）が
  *     請求月なので、その月の26日（三井住友の引落日）を支払日とする。
  *     休日で後ろにずれる分は、引落との照合で幅を持たせて吸収する
@@ -41,6 +48,10 @@ const COL = {
   note: 6,
 } as const;
 
+/** 確定前の明細の6列目（請求月）。`'26/10` */
+const UNCONFIRMED_MONTH = /^'\d{2}\/\d{1,2}$/;
+const NUMBER = /^-?[\d,]+$/;
+
 /** カード見出し行の2列目。`4980-03**-****-****` */
 const MASKED_NUMBER = /^\d{4}-\d{2}\*{2}-\*{4}-\*{4}$/;
 const DATE = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/;
@@ -54,13 +65,23 @@ export const vpassParser: BankParser = {
   label: "三井住友カード（Vpass）",
 
   looksLikeMine(text) {
-    // ヘッダーが無いので、カード見出し行があるかで判定する
-    return parseCsv(text).some((row) => MASKED_NUMBER.test((row[1] ?? "").trim()));
+    // ヘッダーが無いので、カード見出し行があるかで判定する。
+    // 確定前の明細も引き受けて、parse で「取り込めない理由」を返す
+    return parseCsv(text).some(
+      (row) => MASKED_NUMBER.test((row[1] ?? "").trim()) || UNCONFIRMED_MONTH.test((row[5] ?? "").trim()),
+    );
   },
 
   parse(text, filename): ParseResult {
     const table = parseCsv(text).filter((r) => r.some((c) => c.trim() !== ""));
     if (table.length === 0) return empty("ファイルが空です");
+    if (table.some((row) => UNCONFIRMED_MONTH.test((row[5] ?? "").trim()))) {
+      return empty(
+        "確定前のご利用明細です。どのカードの明細かがファイルに書かれておらず、" +
+          "確定後の明細と重複するため取り込みません。請求が確定してから落とし直してください" +
+          "（それまでの利用は利用通知メールで入っています）。",
+      );
+    }
     if (!table.some((row) => MASKED_NUMBER.test((row[1] ?? "").trim()))) {
       return empty("VpassのCSVではないようです（カードの見出し行が見つかりません）");
     }
@@ -98,9 +119,10 @@ export const vpassParser: BankParser = {
       }
       const date = `${md[1]}-${md[2].padStart(2, "0")}-${md[3].padStart(2, "0")}`;
 
-      const amount = toAmount(cells[COL.amount]);
-      if (amount === null || amount === 0) {
-        warnings.push(`${lineNo}行目: 利用金額を読めないため飛ばしました（${cells[COL.amount]}）`);
+      const cols = locateColumns(cells);
+      const amount = cols ? (toAmount(cells[cols.amount]) ?? toAmount(cells[cols.billed])) : null;
+      if (!cols || amount === null || amount === 0) {
+        warnings.push(`${lineNo}行目: 利用金額を読めないため飛ばしました（${cells.join(",")}）`);
         continue;
       }
       if (cardLabel === null) {
@@ -108,10 +130,10 @@ export const vpassParser: BankParser = {
         continue;
       }
 
-      billedSum += toAmount(cells[COL.billed]) ?? 0;
+      billedSum += toAmount(cells[cols.billed]) ?? 0;
 
-      const merchant = (cells[COL.merchant] ?? "").trim();
-      const note = (cells[COL.note] ?? "").trim();
+      const merchant = cells.slice(COL.merchant, cols.amount).join(",").trim();
+      const note = cells.slice(cols.billed + 1).join(",").trim();
 
       // 同じ日・同じ店・同じ金額の明細が本当に2件並ぶことがある
       // （実例: 2026/08/24 JR九州列車予約サービス 1,970円 × 2）。
@@ -173,6 +195,21 @@ export const vpassParser: BankParser = {
     };
   },
 };
+
+/**
+ * 利用金額と当月支払額の列を探す。ふつうは2列目と5列目だが、店名にカンマがあると右にずれる。
+ * 当月支払額（利用金額の3つ右）は必ず数字、利用金額は数字か空（キャッシュバック）。
+ */
+function locateColumns(cells: string[]): { amount: number; billed: number } | null {
+  for (let k = COL.amount; k + 3 < cells.length; k++) {
+    const amount = cells[k].trim();
+    const billed = cells[k + 3].trim();
+    if ((amount === "" || NUMBER.test(amount)) && NUMBER.test(billed)) {
+      return { amount: k, billed: k + 3 };
+    }
+  }
+  return null;
+}
 
 function empty(error: string): ParseResult {
   return { rows: [], periodFrom: null, periodTo: null, warnings: [], error };
