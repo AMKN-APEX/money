@@ -35,6 +35,7 @@ export default async function ReviewPage() {
 
   const pending = (pendingRes.data ?? []) as unknown as Transaction[];
   const accountName = new Map(masters.accounts.map((a) => [a.id, a.name]));
+  const accountType = new Map(masters.accounts.map((a) => [a.id, a.type]));
 
   return (
     <>
@@ -115,6 +116,9 @@ export default async function ReviewPage() {
               {t.merchant_normalized && (
                 <p className="mt-1 text-xs text-slate-600">
                   覚える条件: 摘要が「{t.merchant_normalized}」で始まるもの
+                  {accountType.get(t.account_id) === "credit_card" && t.type === "expense"
+                    ? "（どのカードで払っても当てる）"
+                    : `（${accountName.get(t.account_id) ?? "この口座"}だけ）`}
                 </p>
               )}
 

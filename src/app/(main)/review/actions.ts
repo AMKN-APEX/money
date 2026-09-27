@@ -69,6 +69,15 @@ function isPlaceholderMerchant(normalized: string): boolean {
   return normalized.endsWith("加盟店") || normalized.endsWith("キヤツシング");
 }
 
+/**
+ * 分類をルールとして覚える。
+ *
+ * **カードの支出は全口座に当てる。** 同じ店でも払うカードは変わる。以前は取引の口座に
+ * 限定して覚えていたため、Amazonカードで覚えた店をデビュープラスで払うと、また未分類に
+ * 入っていた（2026-09-27）。
+ * 銀行の摘要（「カード」= ATM引き出し、「手数料」）や振替・収入は、口座ごとに意味が
+ * 違うので、今までどおりその口座に限定する。
+ */
 async function learnRule(
   supabase: Awaited<ReturnType<typeof createClient>>,
   input: {
@@ -79,18 +88,25 @@ async function learnRule(
     toAccountId: string | null;
   },
 ) {
-  const { data: existing } = await supabase
-    .from("rules")
-    .select("id")
-    .eq("account_id", input.accountId)
-    .eq("pattern", input.pattern)
+  const { data: account } = await supabase
+    .from("accounts")
+    .select("type")
+    .eq("id", input.accountId)
     .maybeSingle();
+  const allAccounts = (account as { type: string } | null)?.type === "credit_card" && input.type === "expense";
+  const ruleAccountId = allAccounts ? null : input.accountId;
+
+  const lookup = supabase.from("rules").select("id").eq("pattern", input.pattern);
+  const { data: existing } = await (ruleAccountId
+    ? lookup.eq("account_id", ruleAccountId)
+    : lookup.is("account_id", null)
+  ).maybeSingle();
 
   const payload = {
     priority: 50,
     match_type: "prefix" as const,
     pattern: input.pattern,
-    account_id: input.accountId,
+    account_id: ruleAccountId,
     set_type: input.type,
     category_id: input.categoryId,
     to_account_id: input.toAccountId,
@@ -103,13 +119,16 @@ async function learnRule(
     await supabase.from("rules").insert(payload);
   }
 
-  // 覚えたルールを、同じ口座の未分類にもその場で適用する。
+  // 覚えたルールを、当たる範囲（全口座 or その口座）の未分類にもその場で適用する。
   // 前方一致の判定は JS 側で行う（LIKE のワイルドカードを摘要が含む可能性があるため）
-  const { data: pendingRows } = await supabase
+  const pendingQuery = supabase
     .from("transactions")
     .select("id, merchant_normalized")
-    .eq("account_id", input.accountId)
     .eq("status", "pending_review");
+  const { data: pendingRows } = await (ruleAccountId
+    ? pendingQuery.eq("account_id", ruleAccountId)
+    : // 全口座に当てるのはカードの支出だけ。ほかの口座の返品（収入）には当てない
+      pendingQuery.eq("type", "expense"));
 
   const targets = ((pendingRows ?? []) as { id: string; merchant_normalized: string | null }[])
     .filter((r) => r.merchant_normalized?.startsWith(input.pattern))
