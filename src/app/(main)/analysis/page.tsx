@@ -3,6 +3,8 @@ import { loadAnalysis } from "@/lib/analysis-data";
 import { averageByCategory, topMerchants } from "@/lib/spending";
 import { isYearMonth, monthRange, todayJst, yen } from "@/lib/format";
 import { MonthlyBars } from "@/components/monthly-bars";
+import { CategoryDonut } from "@/components/category-donut";
+import { assignColors, colorOf } from "@/lib/category-colors";
 
 /** 3ヶ月平均との差を「▲ +1,234円」の形で。色だけに頼らず記号と符号も付ける */
 function Delta({ diff }: { diff: number }) {
@@ -23,7 +25,11 @@ export default async function AnalysisPage({ searchParams }: PageProps<"/analysi
   const ym = isYearMonth(raw) && raw <= thisMonth ? raw : thisMonth;
   const month = monthRange(ym);
 
-  const data = await loadAnalysis(ym);
+  // 色の割り当ては「今月までの12ヶ月」で決める。どの月を開いても同じ費目は同じ色にするため
+  const [data, latest] = await Promise.all([
+    loadAnalysis(ym),
+    ym === thisMonth ? null : loadAnalysis(thisMonth),
+  ]);
   if (data.error) {
     return (
       <p className="rounded-xl border border-rose-900 bg-rose-950/50 p-4 text-sm text-rose-300">
@@ -38,8 +44,8 @@ export default async function AnalysisPage({ searchParams }: PageProps<"/analysi
   const average3Total = Math.round(
     data.summaries.slice(-4, -1).reduce((a, m) => a + m.expense, 0) / 3,
   );
-  const maxCategory = Math.max(...current.byCategory.map((c) => c.amount), 1);
   const merchants = topMerchants(data.rows, data.categories, ym);
+  const colors = assignColors((latest ?? data).summaries);
   const partial = ym === thisMonth;
 
   const bars = data.summaries.map((m) => ({
@@ -85,12 +91,30 @@ export default async function AnalysisPage({ searchParams }: PageProps<"/analysi
             </dd>
           </div>
         </dl>
+        {/* 収入と収支。支出だけ見ていると、足りているのかが分からない */}
+        <dl className="mt-2 grid grid-cols-2 gap-2 text-xs">
+          <div className="rounded-xl bg-slate-950/60 p-2.5">
+            <dt className="text-slate-500">収入</dt>
+            <dd className="mt-0.5 text-sm tabular-nums">{yen(current.income)}</dd>
+          </div>
+          <div className="rounded-xl bg-slate-950/60 p-2.5">
+            <dt className="text-slate-500">収支（収入 − 支出）</dt>
+            <dd
+              className={`mt-0.5 text-sm tabular-nums ${
+                current.income - current.expense < 0 ? "text-rose-400" : "text-emerald-400"
+              }`}
+            >
+              {current.income - current.expense < 0 ? "▼ " : "▲ "}
+              {yen(current.income - current.expense)}
+            </dd>
+          </div>
+        </dl>
         {current.extraordinary !== 0 && (
           <p className="mt-3 text-xs text-slate-500">別枠（特別支出・経費精算）: {yen(current.extraordinary)}</p>
         )}
       </section>
 
-      {/* 費目ごと（横棒 + 割合）。費目が多いので円グラフより読み比べやすい */}
+      {/* 費目ごと。ドーナツで全体の割合を見て、下の一覧で金額と3ヶ月平均との差を見る */}
       <section className="mt-6">
         <h2 className="mb-2 flex items-baseline justify-between text-sm font-semibold text-slate-400">
           <span>何に使ったか</span>
@@ -101,32 +125,30 @@ export default async function AnalysisPage({ searchParams }: PageProps<"/analysi
             この月の支出はまだありません
           </p>
         ) : (
-          <ul className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            {current.byCategory.map((c) => {
-              const share = current.expense > 0 ? Math.round((c.amount / current.expense) * 100) : 0;
-              return (
-                <li key={c.name}>
-                  <div className="flex items-baseline justify-between gap-3 text-sm">
-                    <span className="truncate">{c.name}</span>
-                    <span className="shrink-0 tabular-nums">
-                      {yen(c.amount)} <span className="text-xs text-slate-500">{share}%</span>
-                    </span>
-                  </div>
-                  <div className="mt-1 flex items-center gap-3">
-                    <div className="h-2 flex-1 overflow-hidden rounded-r bg-slate-800/60">
-                      <div
-                        className="h-full rounded-r"
-                        style={{ width: `${(c.amount / maxCategory) * 100}%`, background: "#3987e5" }}
-                      />
-                    </div>
-                    <span className="w-24 shrink-0 text-right text-xs tabular-nums">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+            <CategoryDonut categories={current.byCategory} total={current.expense} colors={colors} />
+            {/* 凡例を兼ねた一覧。色だけに頼らないよう、名前と金額を必ず並べる */}
+            <ul className="mt-4 divide-y divide-slate-800 text-sm">
+              {current.byCategory.map((c) => {
+                const share = current.expense > 0 ? Math.round((c.amount / current.expense) * 100) : 0;
+                return (
+                  <li key={c.name} className="flex items-center gap-2 py-2">
+                    <span
+                      aria-hidden
+                      className="h-3 w-3 shrink-0 rounded-sm"
+                      style={{ background: colorOf(colors, c.name) }}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                    <span className="shrink-0 tabular-nums">{yen(c.amount)}</span>
+                    <span className="w-9 shrink-0 text-right text-xs text-slate-500 tabular-nums">{share}%</span>
+                    <span className="w-20 shrink-0 text-right text-xs tabular-nums">
                       <Delta diff={c.amount - (average3.get(c.name) ?? 0)} />
                     </span>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         )}
       </section>
 

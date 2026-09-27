@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { ACCOUNT_COLUMNS } from "@/lib/queries";
-import { currentMonthRange, yen } from "@/lib/format";
+import { currentMonthRange, shortDate, todayJst, yen } from "@/lib/format";
 import { ACCOUNT_TYPE_LABEL, isLiability, type Account } from "@/lib/types";
 
 const GROUPS = [
@@ -11,7 +11,8 @@ const GROUPS = [
 export default async function AccountsPage() {
   const supabase = await createClient();
   const month = currentMonthRange();
-  const [accountsRes, balanceRes, investRes] = await Promise.all([
+  const today = todayJst();
+  const [accountsRes, balanceRes, investRes, billRes] = await Promise.all([
     supabase.from("accounts").select(ACCOUNT_COLUMNS).order("sort_order"),
     supabase.from("account_balances").select("account_id, balance"),
     // 方針2: NISA積立は支出ではなく振替。支出には出てこないので、
@@ -21,6 +22,12 @@ export default async function AccountsPage() {
       .select("date, amount, to_account_id")
       .eq("type", "transfer")
       .not("to_account_id", "is", null),
+    // カードの請求（9.11）。支払日が休日だと引落は後ろにずれるので、1週間前から見る
+    supabase
+      .from("card_statements")
+      .select("account_id, payment_date, amount")
+      .gte("payment_date", shiftDay(today, -7))
+      .order("payment_date"),
   ]);
 
   const error = accountsRes.error?.message ?? balanceRes.error?.message;
@@ -45,6 +52,23 @@ export default async function AccountsPage() {
       Number(b.balance),
     ]),
   );
+
+  // カードごとの、まだ引き落とされていない請求（支払日の早い順）。
+  // 銀行の明細に同じ額の引落が前後7日にあれば、払い済みとして外す
+  const payments = (investRes.data ?? []) as { date: string; amount: number; to_account_id: string }[];
+  const bills = new Map<string, { date: string; amount: number }[]>();
+  for (const b of (billRes.data ?? []) as { account_id: string; payment_date: string; amount: number }[]) {
+    const amount = Number(b.amount);
+    const paid = payments.some(
+      (p) =>
+        p.to_account_id === b.account_id &&
+        Number(p.amount) === amount &&
+        p.date >= shiftDay(b.payment_date, -7) &&
+        p.date <= shiftDay(b.payment_date, 7),
+    );
+    if (paid) continue;
+    bills.set(b.account_id, [...(bills.get(b.account_id) ?? []), { date: b.payment_date, amount }]);
+  }
 
   // 証券口座ごとの今月の投資額。累計は残高（開始残高 + 振替）をそのまま使う
   const invested = new Map<string, { thisMonth: number }>();
@@ -109,6 +133,7 @@ export default async function AccountsPage() {
                           ` → ${byId.get(a.payment_account_id)?.name ?? "?"}`}
                       </p>
                     )}
+                    {isLiability(a.type) && <CardBreakdown unpaid={shown} bills={bills.get(a.id) ?? []} />}
                     {a.type === "securities" && (
                       <p className="mt-1 text-xs text-sky-400 tabular-nums">
                         {/* 累計は残高と同じ。アプリに取引が無い昔の積立は開始残高に入れてある */}
@@ -134,4 +159,39 @@ export default async function AccountsPage() {
       </p>
     </>
   );
+}
+
+/**
+ * カードの未払い額の内訳。
+ * 未払い額 = 取り込んだ利用（明細・利用通知メール）− 銀行から引き落とされた額。
+ * そのうち明細で確定している請求と、まだ請求に入っていない利用（締め日のあと・明細を
+ * 取り込んでいない月）に分けて見せる。1つの数字だと「いつの分か」が分からないため。
+ */
+function CardBreakdown({ unpaid, bills }: { unpaid: number; bills: { date: string; amount: number }[] }) {
+  const billed = bills.reduce((acc, b) => acc + b.amount, 0);
+  const unbilled = unpaid - billed;
+  if (unpaid === 0 && bills.length === 0) return null;
+
+  return (
+    <dl className="mt-1.5 grid gap-0.5 text-xs tabular-nums">
+      {bills.map((b) => (
+        <div key={b.date} className="flex justify-between gap-3">
+          <dt className="text-slate-400">{shortDate(b.date)} 引落予定（請求確定）</dt>
+          <dd>{yen(b.amount)}</dd>
+        </div>
+      ))}
+      {unbilled !== 0 && (
+        <div className="flex justify-between gap-3">
+          <dt className="text-slate-400">まだ請求に入っていない利用</dt>
+          <dd>{yen(unbilled)}</dd>
+        </div>
+      )}
+    </dl>
+  );
+}
+
+function shiftDay(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }

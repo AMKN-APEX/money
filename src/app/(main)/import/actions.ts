@@ -11,7 +11,7 @@ import { vpassParser } from "@/lib/parsers/vpass";
 import { paypayCardParser } from "@/lib/parsers/paypaycard";
 import { rakutenParser } from "@/lib/parsers/rakuten";
 import { pocketcardParser } from "@/lib/parsers/pocketcard";
-import { paidOutside, type Payment, type Statement } from "@/lib/card-statements";
+import { reconcileCardOpenings, type CardOpening } from "@/lib/reconcile-cards";
 import { lastKnownBalance, verifyBalanceChain, type ChainIssue } from "@/lib/parsers/balance-chain";
 import type { ParsedRow, ParserId, StatementBill } from "@/lib/parsers/types";
 import { todayJst } from "@/lib/format";
@@ -37,14 +37,7 @@ export type AccountSummary = {
   openingBalance: number | null;
 };
 
-/** カードの開始残高を計算し直した結果（9.11） */
-export type CardOpening = {
-  accountName: string;
-  /** アプリの外で払い済みとみなした請求の合計 */
-  amount: number;
-  /** そのうち何回分の請求か */
-  statementCount: number;
-};
+export type { CardOpening };
 
 export type ImportSummary = {
   /** 1ファイルに複数カードが入ることがある（Vpass。9.10） */
@@ -177,7 +170,7 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
   }
 
   // 銀行CSVで引落が入ると、払い済み扱いだった請求が外れる。取込の種類を問わず毎回計算する
-  const cardOpenings = await reconcileCardOpenings(supabase, accounts, todayJst());
+  const cardOpenings = await reconcileCardOpenings(supabase, todayJst());
 
   revalidatePath("/", "layout");
 
@@ -508,61 +501,6 @@ async function saveStatements(
   return error
     ? `請求を記録できませんでした（カードの残高がずれます）: ${error.message}`
     : null;
-}
-
-/**
- * カードの開始残高を、請求と銀行からの引落の突き合わせで決め直す。9.11。
- * 引落の見つからない過去の請求は、銀行CSVの範囲より前にアプリの外で払ったもの。
- */
-async function reconcileCardOpenings(
-  supabase: Supabase,
-  accounts: AccountRow[],
-  today: string,
-): Promise<CardOpening[]> {
-  const cards = accounts.filter((a) => a.type === "credit_card");
-  if (cards.length === 0) return [];
-
-  const [{ data: statementRows, error: statementError }, { data: paymentRows, error: paymentError }] =
-    await Promise.all([
-      supabase.from("card_statements").select("account_id, payment_date, amount"),
-      supabase
-        .from("transactions")
-        .select("id, date, amount, to_account_id")
-        .eq("type", "transfer")
-        .in(
-          "to_account_id",
-          cards.map((c) => c.id),
-        ),
-    ]);
-  // 表が無い（マイグレーション未適用）ときに開始残高を0で塗り替えないよう、何もしない
-  if (statementError || paymentError) return [];
-
-  const changed: CardOpening[] = [];
-  for (const card of cards) {
-    const statements: Statement[] = (statementRows ?? [])
-      .filter((s) => s.account_id === card.id)
-      .map((s) => ({ paymentDate: String(s.payment_date), amount: Number(s.amount) }));
-    const payments: Payment[] = (paymentRows ?? [])
-      .filter((p) => p.to_account_id === card.id)
-      .map((p) => ({ id: String(p.id), date: String(p.date), amount: Number(p.amount) }));
-
-    const outside = paidOutside(statements, payments, today);
-    if (outside.amount === Number(card.opening_balance ?? 0)) continue;
-
-    const latest = outside.statements.map((s) => s.paymentDate).sort().at(-1) ?? null;
-    const { error } = await supabase
-      .from("accounts")
-      .update({ opening_balance: outside.amount, opening_balance_date: latest })
-      .eq("id", card.id);
-    if (!error) {
-      changed.push({
-        accountName: card.name,
-        amount: outside.amount,
-        statementCount: outside.statements.length,
-      });
-    }
-  }
-  return changed;
 }
 
 /**

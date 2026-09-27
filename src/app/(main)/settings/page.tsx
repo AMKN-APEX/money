@@ -2,6 +2,7 @@ import Link from "next/link";
 import { signOut } from "@/app/login/actions";
 import { createClient, getUser } from "@/lib/supabase/server";
 import { SubmitButton } from "@/components/submit-button";
+import { recomputeCardBalances } from "./actions";
 
 export default async function SettingsPage() {
   const user = await getUser();
@@ -59,6 +60,16 @@ export default async function SettingsPage() {
           <span className="text-slate-500 tabular-nums">{rules.count ?? 0} 件 →</span>
         </Link>
       </nav>
+
+      {/* 取込のたびに自動で計算しているが、請求を直接足したときなどに手で走らせる */}
+      <form action={recomputeCardBalances} className="mt-5">
+        <SubmitButton
+          pendingLabel="計算しています…"
+          className="w-full rounded-xl border border-slate-700 py-3 text-sm font-medium text-slate-300"
+        >
+          カードの残高を計算し直す
+        </SubmitButton>
+      </form>
 
       <dl className="mt-5 divide-y divide-slate-800 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 text-sm">
         <div className="flex justify-between px-4 py-3">

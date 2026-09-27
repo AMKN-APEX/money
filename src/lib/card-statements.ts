@@ -8,8 +8,8 @@
  * 未払いとして残る。
  *
  * 明細には「支払日にいくら引き落とすか」が載っている。これを取引の引落と照合し、
- * **引落が見つからず、支払日がもう過ぎている請求**は、アプリの外（銀行CSVの
- * 範囲より前）で払い済みとみなして開始残高に足す。
+ * **引落が見つからず、支払日が引落口座の銀行CSVより前の請求**は、アプリの外で
+ * 払い済みとみなして開始残高に足す。
  *
  * 取込のたびに全カードぶん計算し直す。あとから銀行CSVを取り込んで引落が
  * 見つかれば、その請求は開始残高から外れる（二重に足されない）。
@@ -24,11 +24,14 @@ export type Payment = { id: string; date: string; amount: number };
  */
 const WINDOW_DAYS = 7;
 
-/** 開始残高に入れる額と、その内訳 */
+/**
+ * 開始残高に入れる額と、その内訳。
+ * cutoff は引落口座の銀行CSVが始まる日。それ以降の請求は、引落が見つからなければ未払い。
+ */
 export function paidOutside(
   statements: Statement[],
   payments: Payment[],
-  today: string,
+  cutoff: string,
 ): { amount: number; statements: Statement[] } {
   const used = new Set<string>();
   const outside: Statement[] = [];
@@ -44,8 +47,8 @@ export function paidOutside(
       used.add(match.p.id);
       continue;
     }
-    // まだ来ていない支払日は未払いのまま（残高のマイナスとして正しい）
-    if (s.paymentDate <= today) outside.push(s);
+    // 銀行CSVの範囲に入っている請求は、引落が無ければまだ払っていない（残高のマイナスとして正しい）
+    if (s.paymentDate < cutoff) outside.push(s);
   }
 
   return { amount: outside.reduce((acc, s) => acc + s.amount, 0), statements: outside };
