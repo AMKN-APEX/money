@@ -34,7 +34,7 @@ export type ParsedUsage = {
   dedupSeed: string;
 };
 
-export type EmailParserId = "smbc" | "pocketcard" | "kyoto";
+export type EmailParserId = "smbc" | "pocketcard" | "kyoto" | "rakuten";
 
 export type EmailParseResult = {
   /**

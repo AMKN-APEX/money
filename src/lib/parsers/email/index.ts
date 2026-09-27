@@ -1,9 +1,15 @@
 import { pocketcardEmailParser } from "./pocketcard";
 import { smbcEmailParser } from "./smbc";
 import { kyotoEmailParser } from "./kyoto";
+import { rakutenEmailParser } from "./rakuten";
 import type { EmailParser } from "./types";
 
-export const EMAIL_PARSERS: EmailParser[] = [smbcEmailParser, pocketcardEmailParser, kyotoEmailParser];
+export const EMAIL_PARSERS: EmailParser[] = [
+  smbcEmailParser,
+  pocketcardEmailParser,
+  kyotoEmailParser,
+  rakutenEmailParser,
+];
 
 /** 差出人を担当するパーサー。無ければ null（＝まだ書いていないカード会社） */
 export function parserFor(fromAddress: string | null | undefined): EmailParser | null {

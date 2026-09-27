@@ -5,6 +5,7 @@ import { parserFor } from "../src/lib/parsers/email";
 import { smbcEmailParser } from "../src/lib/parsers/email/smbc";
 import { pocketcardEmailParser } from "../src/lib/parsers/email/pocketcard";
 import { kyotoEmailParser } from "../src/lib/parsers/email/kyoto";
+import { rakutenEmailParser } from "../src/lib/parsers/email/rakuten";
 import { splitUsageKind, toDateTime, toYen } from "../src/lib/parsers/email/text";
 import { normalizeMerchant } from "../src/lib/normalize";
 import { classify, type Rule } from "../src/lib/rules";
@@ -44,8 +45,9 @@ test("差出人からパーサーを選ぶ", () => {
   assert.equal(parserFor("statement@vpass.ne.jp")?.id, "smbc");
   assert.equal(parserFor("三井住友カード <statement@vpass.ne.jp>")?.id, "smbc");
   assert.equal(parserFor("announce@pinf.pocketcard.co.jp")?.id, "pocketcard");
+  assert.equal(parserFor("info@mail.rakuten-card.co.jp")?.id, "rakuten");
   // まだパーサーを書いていないカード会社
-  assert.equal(parserFor("info@mail.rakuten-card.co.jp"), null);
+  assert.equal(parserFor("info@paypay-card.co.jp"), null);
   assert.equal(parserFor(null), null);
 });
 
@@ -322,4 +324,43 @@ test("京都銀行: 入金通知でないメールは対象外", () => {
 
 test("京都銀行: 差出人で担当が決まる", () => {
   assert.equal(parserFor("京都銀行 <info@kyotobank.co.jp>")?.id, "kyoto");
+});
+
+// ---------------------------------------------------------------- 楽天カード
+
+test("楽天カード: 利用通知から利用日・利用先・金額を読む", () => {
+  const r = rakutenEmailParser.parse(fixture("rakuten-usage-email.txt"));
+  assert.equal(r.kind, "usage");
+  assert.equal(r.usages.length, 1);
+  const u = r.usages[0];
+  assert.equal(u.date, "2026-09-16");
+  assert.equal(u.amount, 100000);
+  // 「0円」（調整可能な金額）や「500ポイント」を金額と取り違えない
+  assert.ok(normalizeMerchant(u.matchText).startsWith("楽天証券"));
+  // 口座の特定に使うカード名。card_patterns の「楽天カード」に当たる
+  assert.ok(normalizeMerchant(r.cardLabel).includes("楽天カード"));
+});
+
+test("楽天カード: 1通に2件載っていれば2件とも読む", () => {
+  const two = fixture("rakuten-usage-email.txt").replace(
+    "■支払月: 2026/10",
+    "■支払月: 2026/10\n\n■利用日: 2026/09/20\n■利用先: 楽天市場\n■利用金額: 1,234 円",
+  );
+  const r = rakutenEmailParser.parse(two);
+  assert.deepEqual(
+    r.usages.map((u) => [u.date, u.amount]),
+    [
+      ["2026-09-16", 100000],
+      ["2026-09-20", 1234],
+    ],
+  );
+});
+
+test("楽天カード: 利用通知でないメールは対象外", () => {
+  const r = rakutenEmailParser.parse("楽天カードをご利用いただき誠にありがとうございます。\nお引き落とし日のご案内です。");
+  assert.equal(r.kind, "other");
+});
+
+test("楽天カード: 差出人で担当が決まる", () => {
+  assert.equal(parserFor("楽天カード <info@mail.rakuten-card.co.jp>")?.id, "rakuten");
 });
