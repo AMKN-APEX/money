@@ -44,15 +44,14 @@ export default async function AccountsPage() {
     ]),
   );
 
-  // 証券口座ごとの投資額。累計と今月ぶんを出す
-  const invested = new Map<string, { total: number; thisMonth: number }>();
+  // 証券口座ごとの今月の投資額。累計は残高（開始残高 + 振替）をそのまま使う
+  const invested = new Map<string, { thisMonth: number }>();
   for (const t of (investRes.data ?? []) as {
     date: string;
     amount: number;
     to_account_id: string;
   }[]) {
-    const current = invested.get(t.to_account_id) ?? { total: 0, thisMonth: 0 };
-    current.total += t.amount;
+    const current = invested.get(t.to_account_id) ?? { thisMonth: 0 };
     if (t.date >= month.from && t.date <= month.to) current.thisMonth += t.amount;
     invested.set(t.to_account_id, current);
   }
@@ -111,7 +110,8 @@ export default async function AccountsPage() {
                     )}
                     {a.type === "securities" && (
                       <p className="mt-1 text-xs text-sky-400 tabular-nums">
-                        積立 累計 {yen(invested.get(a.id)?.total ?? 0)}
+                        {/* 累計は残高と同じ。アプリに取引が無い昔の積立は開始残高に入れてある */}
+                        積立 累計 {yen(balances.get(a.id) ?? 0)}
                         <span className="text-slate-500">
                           {" / "}今月 {yen(invested.get(a.id)?.thisMonth ?? 0)}
                         </span>
