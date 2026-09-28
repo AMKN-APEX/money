@@ -94,6 +94,9 @@ export async function loadImportReminders(today: string): Promise<ImportReminder
       today,
       coveredTo: coverage.get(a.id) ?? null,
       monthsBack: a.statement_months_back,
+      // 取込済みの最終日は「最後の明細の日付」。カードは確定明細を1枚ずつ取り込むので、
+      // その月は締まっている。月末に使っていないと毎回未取込と出てしまう
+      monthClosed: a.type === "credit_card",
     });
     if (months.length > 0) {
       reminders.push({ accountId: a.id, accountName: a.name, months });

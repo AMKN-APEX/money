@@ -47,12 +47,16 @@ export type MissingMonth = {
  * - 対象は「取得可能な最古の月」から「先月」まで。今月はまだ終わっていないので含めない
  * - すでに取得できなくなった月は諦めるしかないので出さない
  * - coveredTo がその月の末日でなければ、その月は取り直す対象にする
+ * - ただし monthClosed のとき（カード）は、coveredTo の月を末日まで取込済みとみなす。
+ *   カードの確定明細は締め日までの利用がすべて入った1枚なので、最後の利用が
+ *   8/28 でも 8/29〜31 は「使っていない」だけで取り逃しではない
  */
 export function missingMonths(opts: {
   today: string;
   /** 取込済みの最終日。未取込なら null */
   coveredTo: string | null;
   monthsBack: number;
+  monthClosed?: boolean;
 }): MissingMonth[] {
   const thisMonth = monthOf(opts.today);
   const lastMonth = addMonths(thisMonth, -1);
@@ -64,7 +68,8 @@ export function missingMonths(opts: {
   } else {
     const covered = monthOf(opts.coveredTo);
     // その月の末日まで埋まっていれば次の月から、途中までなら同じ月をやり直す
-    start = opts.coveredTo >= lastDayOf(covered) ? addMonths(covered, 1) : covered;
+    const wholeMonth = opts.monthClosed || opts.coveredTo >= lastDayOf(covered);
+    start = wholeMonth ? addMonths(covered, 1) : covered;
     if (start < oldestAvailable) start = oldestAvailable;
   }
 

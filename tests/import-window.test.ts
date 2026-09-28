@@ -70,3 +70,14 @@ test("期限当日は daysLeft = 0", () => {
   assert.equal(got[0].ym, "2026-08");
   assert.equal(got[0].daysLeft, 0);
 });
+
+test("カードは最後の利用が月末でなくても、その月を取込済みとみなす", () => {
+  // Amazonカードの8月分の確定明細は、最後の利用が 8/28 だった
+  const got = missingMonths({
+    today: "2026-09-28",
+    coveredTo: "2026-08-28",
+    monthsBack: 14,
+    monthClosed: true,
+  });
+  assert.deepEqual(got, []);
+});
