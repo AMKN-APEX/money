@@ -197,7 +197,7 @@ test("ルール: priority の小さいものが優先される", () => {
 
 // ---------------------------------------------------------------- Vpass
 
-test("Vpass: 1ファイルに入った2枚ぶんを、カード名ごとに振り分ける", () => {
+test("Vpass: 1ファイルに入った iD の明細も、本カードの口座に振り分ける", () => {
   const r = vpassParser.parse(fixture("vpass-sample.csv"), "202609.csv", "2026-09-23");
 
   assert.equal(r.error, null);
@@ -206,7 +206,8 @@ test("Vpass: 1ファイルに入った2枚ぶんを、カード名ごとに振�
   assert.equal(r.periodTo, "2026-08-28");
 
   const cards = [...new Set(r.rows.map((x) => x.cardLabel))];
-  assert.deepEqual(cards, ["三井住友カードデビュープラスＶＩＳＡ", "ＡｐｐｌｅＰａｙ／ｉＤ"]);
+  // ＡｐｐｌｅＰａｙ／ｉＤ は同じ請求に入るので、口座はデビュープラスで決める
+  assert.deepEqual(cards, ["三井住友カードデビュープラスＶＩＳＡ"]);
 });
 
 test("Vpass: 返品はマイナス金額で来るので入金として扱う", () => {

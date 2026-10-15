@@ -225,3 +225,30 @@ test("Vpass: 確定前の明細は取り込まず、理由を返す", () => {
   assert.equal(r.rows.length, 0);
   assert.match(r.error ?? "", /確定前/);
 });
+
+test("Vpass: Amazonカードの ＡｐｐｌｅＰａｙ 見出しは本カードの口座に入れる", () => {
+  const csv =
+    "山田　太郎　様,5334-91**-****-****,Ａｍａｚｏｎマスター\r\n" +
+    "2026/09/01,ＡＭＡＺＯＮ．ＣＯ．ＪＰ,25297,１,１,25297,\r\n" +
+    "山田　太郎　様,5334-99**-****-****,ＡｐｐｌｅＰａｙ\r\n" +
+    "2026/09/29,モバイルＩＣＯＣＡチャージ,5000,１,１,5000,\r\n" +
+    ",,,,,30297,\r\n";
+  const r = vpassParser.parse(csv, "202610.csv", "2026-10-15");
+  assert.deepEqual(r.warnings, []);
+  assert.deepEqual(r.rows.map((x) => x.cardLabel), ["Ａｍａｚｏｎマスター", "Ａｍａｚｏｎマスター"]);
+  // 重複排除のキーは見出しの名前のまま
+  assert.match(r.rows[1].dedupSeed ?? "", /^vpass:ＡｐｐｌｅＰａｙ:/);
+  assert.equal(r.statements?.[0].amount, 30297);
+});
+
+test("Vpass: デビュープラスの ＡｐｐｌｅＰａｙ／ｉＤ も本カードの名前で口座を決める", () => {
+  const csv =
+    VPASS_HEAD +
+    "2026/09/02,ゼッテリア,790,１,１,790,\r\n" +
+    "山田　太郎　様,6900-11**-****-****,ＡｐｐｌｅＰａｙ／ｉＤ\r\n" +
+    "2026/09/08,ファミリーマート／ｉＤ,415,１,１,415,\r\n" +
+    ",,,,,1205,\r\n";
+  const r = vpassParser.parse(csv, "202610 (1).csv", "2026-10-15");
+  assert.equal(r.rows[1].cardLabel, "三井住友カードデビュープラスＶＩＳＡ");
+  assert.match(r.rows[1].dedupSeed ?? "", /^vpass:ＡｐｐｌｅＰａｙ／ｉＤ:/);
+});

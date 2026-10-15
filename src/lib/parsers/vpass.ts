@@ -21,6 +21,10 @@
  *     方針1のとおり独立した口座にはしない。同じ請求にまとめられており
  *     （合計行が両セクションの和と一致することを実ファイルで確認）、
  *     デビュープラスの取引として channel = id で記録する
+ *   - **Amazonカードにも ＡｐｐｌｅＰａｙ の見出しが付く**（`5334-99**` / 2026年10月請求で確認）。
+ *     こちらも同じ請求の合計に入っている。Apple Pay の見出しは呼び名だけでは
+ *     どのカードか決まらないので、口座の決定にはファイル内で直前の本カードの名前を使う。
+ *     重複排除のキーは従来どおり見出しの名前で作る（取込済みの iD 明細と二重にしない）
  *   - **返品がマイナス金額で出る**（`-1970` / 備考「返品」）
  *   - 海外利用は末尾にまとめられ、日付順に並ばない。備考にレートが入る
  *   - 数字以外はほぼ全角。正規化は normalizeMerchant() 側で行う
@@ -35,6 +39,7 @@
  *     請求月なので、その月の26日（三井住友の引落日）を支払日とする。
  *     休日で後ろにずれる分は、引落との照合で幅を持たせて吸収する
  */
+import { normalizeMerchant } from "../normalize";
 import { parseCsv, toAmount } from "./csv";
 import type { BankParser, ParseResult, ParsedRow, StatementBill } from "./types";
 
@@ -57,6 +62,11 @@ const MASKED_NUMBER = /^\d{4}-\d{2}\*{2}-\*{4}-\*{4}$/;
 const DATE = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/;
 /** 三井住友カードの引落日（毎月26日） */
 const PAYMENT_DAY = "26";
+
+/** 本カードに付いてくる Apple Pay の見出し（`ＡｐｐｌｅＰａｙ` / `ＡｐｐｌｅＰａｙ／ｉＤ`） */
+function isWalletHeading(label: string): boolean {
+  return normalizeMerchant(label).startsWith("APPLEPAY");
+}
 
 export const vpassParser: BankParser = {
   id: "vpass",
@@ -90,6 +100,8 @@ export const vpassParser: BankParser = {
     const rows: ParsedRow[] = [];
     const seen = new Map<string, number>();
     let cardLabel: string | null = null;
+    /** 口座を決めるための名前。Apple Pay の見出しでは直前の本カードの名前を引き継ぐ */
+    let accountLabel: string | null = null;
     let billedTotal: number | null = null;
     let billedSum = 0;
 
@@ -101,6 +113,10 @@ export const vpassParser: BankParser = {
         cardLabel = (cells[2] ?? "").trim() || null;
         if (!cardLabel) {
           warnings.push(`${lineNo}行目: カード名が空の見出し行がありました`);
+          accountLabel = null;
+        } else if (!isWalletHeading(cardLabel) || accountLabel === null) {
+          // 本カードの見出し。Apple Pay がファイルの先頭に来たときは、そのまま照合に回す
+          accountLabel = cardLabel;
         }
         continue;
       }
@@ -125,7 +141,7 @@ export const vpassParser: BankParser = {
         warnings.push(`${lineNo}行目: 利用金額を読めないため飛ばしました（${cells.join(",")}）`);
         continue;
       }
-      if (cardLabel === null) {
+      if (cardLabel === null || accountLabel === null) {
         warnings.push(`${lineNo}行目: どのカードの明細か分からないため飛ばしました`);
         continue;
       }
@@ -153,7 +169,7 @@ export const vpassParser: BankParser = {
         balanceAfter: null,
         dedupSeed: `vpass:${key}:${occurrence}`,
         lineNo,
-        cardLabel,
+        cardLabel: accountLabel,
         memo: note || null,
       });
     }
