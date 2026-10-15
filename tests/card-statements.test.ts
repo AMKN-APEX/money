@@ -7,7 +7,8 @@ import { pocketcardParser } from "../src/lib/parsers/pocketcard";
 import { paypayCardParser } from "../src/lib/parsers/paypaycard";
 import { vpassParser } from "../src/lib/parsers/vpass";
 import { kyotoParser } from "../src/lib/parsers/kyoto";
-import { paidOutside } from "../src/lib/card-statements";
+import { cardForPayment, indistinguishableCards, paidOutside } from "../src/lib/card-statements";
+import { shortDate } from "../src/lib/format";
 import { normalizeMerchant } from "../src/lib/normalize";
 
 const fixture = (name: string) => readFileSync(`tests/fixtures/${name}`, "utf8");
@@ -251,4 +252,42 @@ test("Vpass: デビュープラスの ＡｐｐｌｅＰａｙ／ｉＤ も本�
   const r = vpassParser.parse(csv, "202610 (1).csv", "2026-10-15");
   assert.equal(r.rows[1].cardLabel, "三井住友カードデビュープラスＶＩＳＡ");
   assert.match(r.rows[1].dedupSeed ?? "", /^vpass:ＡｐｐｌｅＰａｙ／ｉＤ:/);
+});
+
+// ---------------------------------------------------------------- 見分けられないカードの引落（9.3）
+
+test("三井住友の2枚は見分けられない。引落口座が違えば別扱い", () => {
+  const accounts = [
+    { id: "amazon", type: "credit_card", issuer: "三井住友カード", payment_account_id: "kyoto" },
+    { id: "debut", type: "credit_card", issuer: "三井住友カード", payment_account_id: "kyoto" },
+    { id: "rakuten", type: "credit_card", issuer: "楽天カード", payment_account_id: "kyoto" },
+    { id: "kyoto", type: "bank", issuer: "京都銀行", payment_account_id: null },
+  ];
+  assert.deepEqual(indistinguishableCards(accounts, "debut").map((a) => a.id), ["amazon", "debut"]);
+  assert.deepEqual(indistinguishableCards(accounts, "rakuten"), []);
+  assert.deepEqual(indistinguishableCards(accounts, "kyoto"), []);
+});
+
+test("引落の相手カードを請求額で決める（2026-09-28 の実例）", () => {
+  const cards = [
+    { accountId: "amazon", statements: [{ paymentDate: "2026-09-26", amount: 160051 }] },
+    { accountId: "debut", statements: [{ paymentDate: "2026-09-26", amount: 110044 }] },
+  ];
+  assert.equal(cardForPayment({ date: "2026-09-28", amount: 160051 }, cards), "amazon");
+  assert.equal(cardForPayment({ date: "2026-09-28", amount: 110044 }, cards), "debut");
+  // 請求が無い・遠い日付なら決めない（未分類へ）
+  assert.equal(cardForPayment({ date: "2026-09-28", amount: 12345 }, cards), null);
+  assert.equal(cardForPayment({ date: "2026-10-28", amount: 160051 }, cards), null);
+});
+
+test("同額の請求が2枚にあれば決めない", () => {
+  const cards = [
+    { accountId: "amazon", statements: [{ paymentDate: "2026-09-26", amount: 5000 }] },
+    { accountId: "debut", statements: [{ paymentDate: "2026-09-26", amount: 5000 }] },
+  ];
+  assert.equal(cardForPayment({ date: "2026-09-28", amount: 5000 }, cards), null);
+});
+
+test("日付の表示は、サーバーのタイムゾーンによらず同じ日になる", () => {
+  assert.equal(shortDate("2026-10-26"), "10/26(月)");
 });

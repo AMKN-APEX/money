@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { indistinguishableCards } from "@/lib/card-statements";
 import type { TxType } from "@/lib/types";
 
 /**
@@ -47,7 +48,12 @@ export async function resolvePending(formData: FormData) {
     })
     .eq("id", id);
 
-  if (learn && current.merchant_normalized && !isPlaceholderMerchant(current.merchant_normalized)) {
+  if (
+    learn &&
+    current.merchant_normalized &&
+    !isPlaceholderMerchant(current.merchant_normalized) &&
+    !(await isIndistinguishableCard(supabase, toAccountId))
+  ) {
     await learnRule(supabase, {
       pattern: current.merchant_normalized,
       accountId: current.account_id,
@@ -58,6 +64,26 @@ export async function resolvePending(formData: FormData) {
   }
 
   revalidatePath("/", "layout");
+}
+
+/**
+ * 摘要では見分けられないカードへの振替か（三井住友の Amazonカード / デビュープラス。9.3）。
+ * 「ミツイスミトモカード → デビュープラス」と覚えると、Amazonカードの引落まで
+ * デビュープラスに付く（2026-10）。取込時に請求額で決めるので、ルールにはしない。
+ */
+async function isIndistinguishableCard(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  toAccountId: string | null,
+): Promise<boolean> {
+  if (!toAccountId) return false;
+  const { data } = await supabase.from("accounts").select("id, type, issuer, payment_account_id");
+  const accounts = (data ?? []) as {
+    id: string;
+    type: string;
+    issuer: string | null;
+    payment_account_id: string | null;
+  }[];
+  return indistinguishableCards(accounts, toAccountId).length > 0;
 }
 
 /**

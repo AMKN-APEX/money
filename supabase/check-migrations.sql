@@ -26,5 +26,8 @@ select
   exists(select 1 from rules where pattern = 'MACHICON')         as "0927_02_classify_pending",
   exists(select 1 from accounts where '京銀ダイレクト' = any(card_patterns)) as "0927_03_kyoto_email",
   exists(select 1 from accounts where '楽天カード' = any(card_patterns)) as "0927_07_rakuten_email",
+  -- 引落がAmazonカードに付いていれば true（9/28 160,051円）
+  exists(select 1 from transactions t join accounts a on a.id = t.to_account_id
+          where a.name = 'Amazonカード' and t.type = 'transfer')     as "1015_01_smbc_payments",
   -- true なら 0923_02 が途中で止まっている（本来は消える列）
   exists(select 1 from col where column_name = 'email_card_pattern')     as "旧列が残っている";

@@ -11,9 +11,10 @@ export function yen(amount: number | null | undefined): string {
 
 /** 2026-09-22 → 9/22(火) */
 export function shortDate(iso: string): string {
-  const d = new Date(`${iso}T00:00:00+09:00`);
-  const wd = ["日", "月", "火", "水", "木", "金", "土"][d.getDay()];
-  return `${d.getMonth() + 1}/${d.getDate()}(${wd})`;
+  // 日付だけを UTC で読む。JST の0時で作ると、UTC で動く Vercel では前日になる（10/26 が 10/25(日) と出た）
+  const d = new Date(`${iso}T00:00:00Z`);
+  const wd = ["日", "月", "火", "水", "木", "金", "土"][d.getUTCDay()];
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${wd})`;
 }
 
 /** 今日（JST）を YYYY-MM-DD で返す */

@@ -58,3 +58,41 @@ function dayDiff(a: string, b: string): number {
   const ms = Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`);
   return Math.round(ms / 86_400_000);
 }
+
+/**
+ * 銀行の摘要では見分けられないカード（同じ会社・同じ引落口座）。9.3。
+ * 三井住友の Amazonカード とデビュープラスは、どちらの引落も「ミツイスミトモカード」になる。
+ * 1枚しか無ければ空。
+ */
+export function indistinguishableCards<
+  A extends { id: string; type: string; issuer: string | null; payment_account_id: string | null },
+>(accounts: A[], cardId: string): A[] {
+  const card = accounts.find((a) => a.id === cardId);
+  if (!card || card.type !== "credit_card" || !card.issuer) return [];
+  const same = accounts.filter(
+    (a) =>
+      a.type === "credit_card" &&
+      a.issuer === card.issuer &&
+      a.payment_account_id === card.payment_account_id,
+  );
+  return same.length > 1 ? same : [];
+}
+
+/**
+ * 銀行の引落が、どのカードの請求を払ったものかを請求額で決める。
+ * 同額の請求が支払日の前後7日にあるカードが1枚だけならそのカード。無い・2枚以上なら null。
+ *
+ * 摘要からルールで決めると、見分けられないカードの引落がすべて同じカードに付く。
+ * 2026-10 に Amazonカードの引落3回（計 261,424円）がデビュープラスに付いていた。
+ */
+export function cardForPayment(
+  payment: { date: string; amount: number },
+  cards: { accountId: string; statements: Statement[] }[],
+): string | null {
+  const hits = cards.filter((c) =>
+    c.statements.some(
+      (s) => s.amount === payment.amount && Math.abs(dayDiff(payment.date, s.paymentDate)) <= WINDOW_DAYS,
+    ),
+  );
+  return hits.length === 1 ? hits[0].accountId : null;
+}

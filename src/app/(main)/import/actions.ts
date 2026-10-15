@@ -12,6 +12,7 @@ import { paypayCardParser } from "@/lib/parsers/paypaycard";
 import { rakutenParser } from "@/lib/parsers/rakuten";
 import { pocketcardParser } from "@/lib/parsers/pocketcard";
 import { reconcileCardOpenings, type CardOpening } from "@/lib/reconcile-cards";
+import { cardForPayment, indistinguishableCards, type Statement } from "@/lib/card-statements";
 import { lastKnownBalance, verifyBalanceChain, type ChainIssue } from "@/lib/parsers/balance-chain";
 import type { ParsedRow, ParserId, StatementBill } from "@/lib/parsers/types";
 import { todayJst } from "@/lib/format";
@@ -60,7 +61,7 @@ export type ImportState = {
   summary: ImportSummary | null;
 };
 
-type AccountRow = Pick<Account, "id" | "name" | "type"> & {
+type AccountRow = Pick<Account, "id" | "name" | "type" | "issuer" | "payment_account_id"> & {
   opening_balance: number | null;
   card_patterns: string[] | null;
 };
@@ -90,7 +91,7 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
 
   const { data: accountRows, error: accountError } = await supabase
     .from("accounts")
-    .select("id, name, type, opening_balance, card_patterns");
+    .select("id, name, type, issuer, payment_account_id, opening_balance, card_patterns");
   if (accountError) return fail(`口座を読めませんでした: ${accountError.message}`);
   const accounts = (accountRows ?? []) as AccountRow[];
 
@@ -144,6 +145,25 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
     .maybeSingle();
   const refundCategoryId = (refundRow as { id: string } | null)?.id ?? null;
 
+  // 9.3: 摘要で見分けられないカードの引落は、請求額で相手のカードを決める
+  const { data: statementRows } = await supabase
+    .from("card_statements")
+    .select("account_id, payment_date, amount");
+  const statements = new Map<string, Statement[]>();
+  for (const s of (statementRows ?? []) as { account_id: string; payment_date: string; amount: number }[]) {
+    const list = statements.get(s.account_id) ?? [];
+    list.push({ paymentDate: s.payment_date, amount: Number(s.amount) });
+    statements.set(s.account_id, list);
+  }
+  const payee: Payee = (cardId, row) => {
+    const cards = indistinguishableCards(accounts, cardId);
+    if (cards.length === 0) return cardId;
+    return cardForPayment(
+      row,
+      cards.map((c) => ({ accountId: c.id, statements: statements.get(c.id) ?? [] })),
+    );
+  };
+
   // カード明細は請求ごとの1枚で、利用の無い月はファイル自体が無い。
   // 利用日の間が空いていても取り逃しではないので、未取込期間の警告は出さない
   const checkGap = !parsed.statements || parsed.statements.length === 0;
@@ -159,6 +179,7 @@ export async function importCsv(_prev: ImportState, formData: FormData): Promise
       warnings,
       checkGap,
       refundCategoryId,
+      payee,
     );
     if ("error" in result) return fail(result.error);
     summaries.push(result.summary);
@@ -254,6 +275,9 @@ function resolveCard(accounts: AccountRow[], cardLabel: string): AccountRow | nu
   );
 }
 
+/** 引落の相手として決まったカードを、請求額で確かめ直す。決められなければ null */
+type Payee = (cardId: string, row: { date: string; amount: number }) => string | null;
+
 async function importGroup(
   supabase: Supabase,
   group: Group,
@@ -263,6 +287,7 @@ async function importGroup(
   warnings: string[],
   checkGap: boolean,
   refundCategoryId: string | null,
+  payee: Payee,
 ): Promise<{ summary: AccountSummary } | { error: string }> {
   const { account, rows } = group;
   const dates = rows.map((r) => r.date).sort();
@@ -346,6 +371,9 @@ async function importGroup(
       status = refundCategoryId ? "confirmed" : "pending_review";
       memo = joinMemo(memo, "返品・払い戻し");
     }
+
+    // 三井住友の2枚のように摘要が同じカードは、ルールが指すカードを信じず請求額で決める
+    if (type === "transfer" && toAccountId) toAccountId = payee(toAccountId, row);
 
     // 9.3: 振替と分かっても相手口座を特定できない場合がある
     // （三井住友カード2枚が同じ摘要になる）。保留にして人に決めてもらう。
