@@ -30,6 +30,8 @@ export type EmailApplyResult = {
   failed: number;
   /** 未分類トレイ行きになった取引 */
   pendingReview: number;
+  /** 記録したカードの請求（請求金額のお知らせ） */
+  statements: number;
   /** 担当するパーサーが無い差出人（未解析のまま残す） */
   unknownSender: number;
 };
@@ -42,7 +44,7 @@ type EmailRow = {
   body: string;
 };
 
-type AccountRow = { id: string; name: string; card_patterns: string[] | null };
+type AccountRow = { id: string; name: string; type: string; card_patterns: string[] | null };
 
 const EMPTY: EmailApplyResult = {
   processed: 0,
@@ -51,6 +53,7 @@ const EMPTY: EmailApplyResult = {
   ignored: 0,
   failed: 0,
   pendingReview: 0,
+  statements: 0,
   unknownSender: 0,
 };
 
@@ -71,7 +74,7 @@ export async function applyEmailParsers(
   if (emails.length === 0) return { ...EMPTY };
 
   const [{ data: accountRows }, { data: ruleRows }] = await Promise.all([
-    supabase.from("accounts").select("id, name, card_patterns").eq("user_id", userId),
+    supabase.from("accounts").select("id, name, type, card_patterns").eq("user_id", userId),
     supabase
       .from("rules")
       .select(
@@ -125,6 +128,41 @@ export async function applyEmailParsers(
           "口座の card_patterns に、このカード名に当たるパターンを登録してください。",
       });
       result.failed++;
+      continue;
+    }
+
+    if (parsed.kind === "statement" && parsed.statement) {
+      if (account.type !== "credit_card") {
+        await markEmail(supabase, email.id, {
+          status: "failed",
+          parser_id: parser.id,
+          error: `請求の通知ですが、カード名から当たった口座（${account.name}）がカードではありません`,
+        });
+        result.failed++;
+        continue;
+      }
+      // 取引は作らず、カードの請求として残す（9.11）。
+      // 同じ支払日の請求はCSV・PDFの取込でも入るので、後から来たほうで上書きする
+      const { error } = await supabase.from("card_statements").upsert(
+        {
+          user_id: userId,
+          account_id: account.id,
+          payment_date: parsed.statement.paymentDate,
+          amount: parsed.statement.amount,
+        },
+        { onConflict: "account_id,payment_date" },
+      );
+      if (error) {
+        await markEmail(supabase, email.id, {
+          status: "failed",
+          parser_id: parser.id,
+          error: `請求を記録できませんでした: ${error.message}`,
+        });
+        result.failed++;
+        continue;
+      }
+      await markEmail(supabase, email.id, { status: "parsed", parser_id: parser.id, error: null });
+      result.statements++;
       continue;
     }
 

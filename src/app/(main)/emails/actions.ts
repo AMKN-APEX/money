@@ -22,6 +22,7 @@ function summarize(r: EmailApplyResult): string {
   if (r.created > 0) parts.push(`取引 ${r.created} 件を作成`);
   if (r.duplicated > 0) parts.push(`すでに取引済み ${r.duplicated} 件`);
   if (r.pendingReview > 0) parts.push(`未分類トレイ ${r.pendingReview} 件`);
+  if (r.statements > 0) parts.push(`カードの請求 ${r.statements} 件を記録`);
   if (r.ignored > 0) parts.push(`利用通知ではない ${r.ignored} 件`);
   if (r.failed > 0) parts.push(`解析できず ${r.failed} 件`);
   if (r.unknownSender > 0) parts.push(`パーサー未対応の差出人 ${r.unknownSender} 件`);

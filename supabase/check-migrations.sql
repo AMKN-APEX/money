@@ -29,5 +29,6 @@ select
   -- 引落がAmazonカードに付いていれば true（9/28 160,051円）
   exists(select 1 from transactions t join accounts a on a.id = t.to_account_id
           where a.name = 'Amazonカード' and t.type = 'transfer')     as "1015_01_smbc_payments",
+  exists(select 1 from accounts where 'PAYPAYカード' = any(card_patterns)) as "1017_01_paypaycard_email",
   -- true なら 0923_02 が途中で止まっている（本来は消える列）
   exists(select 1 from col where column_name = 'email_card_pattern')     as "旧列が残っている";

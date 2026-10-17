@@ -34,18 +34,32 @@ export type ParsedUsage = {
   dedupSeed: string;
 };
 
-export type EmailParserId = "smbc" | "pocketcard" | "kyoto" | "rakuten";
+/**
+ * メール1通から取れた請求1件（カードの「請求金額のお知らせ」）。
+ * 取引ではなく card_statements に入る。引落の突き合わせと、口座画面の引落予定に使う
+ */
+export type ParsedStatement = {
+  /** 支払日 YYYY-MM-DD */
+  paymentDate: string;
+  /** 正の整数（円） */
+  amount: number;
+};
+
+export type EmailParserId = "smbc" | "pocketcard" | "kyoto" | "rakuten" | "paypaycard";
 
 export type EmailParseResult = {
   /**
    * usage … 利用通知。usages に中身がある
+   * statement … 請求額の確定通知。statement に中身がある
    * other … 宣伝・ログイン通知など、取り込む対象ではないメール
    * error … 利用通知のはずなのに読めなかった。文面が変わった可能性がある
    */
-  kind: "usage" | "other" | "error";
+  kind: "usage" | "statement" | "other" | "error";
   /** 本文に書かれていたカードの名前。口座の特定に使う */
   cardLabel: string | null;
   usages: ParsedUsage[];
+  /** kind が statement のときだけ入る */
+  statement?: ParsedStatement;
   error: string | null;
 };
 

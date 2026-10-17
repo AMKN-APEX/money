@@ -6,6 +6,7 @@ import { smbcEmailParser } from "../src/lib/parsers/email/smbc";
 import { pocketcardEmailParser } from "../src/lib/parsers/email/pocketcard";
 import { kyotoEmailParser } from "../src/lib/parsers/email/kyoto";
 import { rakutenEmailParser } from "../src/lib/parsers/email/rakuten";
+import { paypaycardEmailParser } from "../src/lib/parsers/email/paypaycard";
 import { splitUsageKind, toDateTime, toYen } from "../src/lib/parsers/email/text";
 import { normalizeMerchant } from "../src/lib/normalize";
 import { classify, type Rule } from "../src/lib/rules";
@@ -46,8 +47,9 @@ test("差出人からパーサーを選ぶ", () => {
   assert.equal(parserFor("三井住友カード <statement@vpass.ne.jp>")?.id, "smbc");
   assert.equal(parserFor("announce@pinf.pocketcard.co.jp")?.id, "pocketcard");
   assert.equal(parserFor("info@mail.rakuten-card.co.jp")?.id, "rakuten");
-  // まだパーサーを書いていないカード会社
-  assert.equal(parserFor("info@paypay-card.co.jp"), null);
+  assert.equal(parserFor("PayPayカード <info@mail.paypay-card.co.jp>")?.id, "paypaycard");
+  // まだパーサーを書いていない差出人
+  assert.equal(parserFor("info@paypay-corp.co.jp"), null);
   assert.equal(parserFor(null), null);
 });
 
@@ -363,4 +365,30 @@ test("楽天カード: 利用通知でないメールは対象外", () => {
 
 test("楽天カード: 差出人で担当が決まる", () => {
   assert.equal(parserFor("楽天カード <info@mail.rakuten-card.co.jp>")?.id, "rakuten");
+});
+
+// ---------------------------------------------------------------- PayPayカード
+
+test("PayPayカード: 請求金額のお知らせから支払日と請求額を読む（実物の形）", () => {
+  const r = paypaycardEmailParser.parse(fixture("paypaycard-billing-email.txt"));
+
+  assert.equal(r.kind, "statement");
+  assert.equal(r.cardLabel, "PayPayカード(Visa)");
+  assert.deepEqual(r.statement, { paymentDate: "2026-10-27", amount: 1855 });
+  assert.equal(r.usages.length, 0);
+  // 口座は card_patterns の PAYPAYカード で決まる（migration 20261017000001）
+  assert.ok(normalizeMerchant(r.cardLabel).includes("PAYPAYカード"));
+});
+
+test("PayPayカード: 0円の請求と宣伝メールは対象外にする", () => {
+  const zero = fixture("paypaycard-billing-email.txt").replace("1,855円", "0円");
+  assert.equal(paypaycardEmailParser.parse(zero).kind, "other");
+  assert.equal(paypaycardEmailParser.parse("まるごとフラットリボのご案内").kind, "other");
+});
+
+test("PayPayカード: 支払い日が読めなければ解析できずにする", () => {
+  const broken = fixture("paypaycard-billing-email.txt").replace("2026年10月27日", "10月27日");
+  const r = paypaycardEmailParser.parse(broken);
+  assert.equal(r.kind, "error");
+  assert.match(r.error ?? "", /支払い日/);
 });

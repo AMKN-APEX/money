@@ -186,7 +186,8 @@ export default async function EmailsPage({ searchParams }: PageProps<"/emails">)
                       {m.subject ?? "(件名なし)"}
                     </p>
                     <p className={`mt-1 text-xs ${STATUS_CLASS[m.status]}`}>
-                      {STATUS_LABEL[m.status]}
+                      {/* 請求金額のお知らせは取引を作らず、カードの請求として記録する */}
+                      {m.status === "parsed" && m.parser_id === "paypaycard" && !m.transaction_id ? "請求を記録済み" : STATUS_LABEL[m.status]}
                       {m.parser_id && `・${m.parser_id}`}
                       {m.error && `・${m.error}`}
                     </p>
