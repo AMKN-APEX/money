@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { loadAnalysis } from "@/lib/analysis-data";
-import { averageByCategory, topMerchants } from "@/lib/spending";
+import { HISTORY_MONTHS, loadAnalysis, loadNetWorth } from "@/lib/analysis-data";
+import { averageByCategory, monthsEndingAt, topMerchants } from "@/lib/spending";
 import { isYearMonth, monthRange, todayJst, yen } from "@/lib/format";
 import { MonthlyBars } from "@/components/monthly-bars";
 import { CategoryDonut } from "@/components/category-donut";
+import { NetWorthLine } from "@/components/net-worth-line";
 import { assignColors, colorOf } from "@/lib/category-colors";
 
 /** 3ヶ月平均との差を「▲ +1,234円」の形で。色だけに頼らず記号と符号も付ける */
@@ -26,9 +27,10 @@ export default async function AnalysisPage({ searchParams }: PageProps<"/analysi
   const month = monthRange(ym);
 
   // 色の割り当ては「今月までの12ヶ月」で決める。どの月を開いても同じ費目は同じ色にするため
-  const [data, latest] = await Promise.all([
+  const [data, latest, worth] = await Promise.all([
     loadAnalysis(ym),
     ym === thisMonth ? null : loadAnalysis(thisMonth),
+    loadNetWorth(monthsEndingAt(ym, HISTORY_MONTHS)),
   ]);
   if (data.error) {
     return (
@@ -196,6 +198,63 @@ export default async function AnalysisPage({ searchParams }: PageProps<"/analysi
               </tbody>
             </table>
           </details>
+        </div>
+      </section>
+
+      {/* 純資産の推移。月末ごとの「資産 − カード未払」。今月の点はホームの純資産と同じ */}
+      <section className="mt-6">
+        <h2 className="mb-2 text-sm font-semibold text-slate-400">純資産の推移（月末）</h2>
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+          {worth.error ? (
+            <p className="text-sm text-rose-300">読み込めませんでした: {worth.error}</p>
+          ) : worth.points.every((p) => p.net === null) ? (
+            <p className="text-sm text-slate-400">
+              銀行の明細を取り込むと、その月から純資産の推移が出ます。
+            </p>
+          ) : (
+            <>
+              <NetWorthLine
+                dots={worth.points.map((p) => ({ ym: p.ym, label: monthRange(p.ym).label, net: p.net }))}
+              />
+              {worth.points.some((p) => p.net === null) && worth.knownFrom && (
+                <p className="mt-2 text-xs text-slate-500">
+                  銀行の明細は{Number(worth.knownFrom.slice(5, 7))}月{Number(worth.knownFrom.slice(8))}日
+                  からしか取り込めていないため、それより前の月末の残高は分かりません。
+                </p>
+              )}
+              <details className="mt-3 text-xs text-slate-400">
+                <summary className="cursor-pointer">表で見る</summary>
+                <table className="mt-2 w-full tabular-nums">
+                  <thead>
+                    <tr className="text-slate-500">
+                      <th className="py-1 text-left font-normal">月末</th>
+                      <th className="py-1 text-right font-normal">資産</th>
+                      <th className="py-1 text-right font-normal">カード未払</th>
+                      <th className="py-1 text-right font-normal">純資産</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...worth.points].reverse().map((p) => (
+                      <tr key={p.ym} className="border-t border-slate-800">
+                        <td className="py-1">{monthRange(p.ym).label}</td>
+                        {p.net === null ? (
+                          <td colSpan={3} className="py-1 text-right text-slate-600">
+                            記録なし
+                          </td>
+                        ) : (
+                          <>
+                            <td className="py-1 text-right">{yen(p.assets ?? 0)}</td>
+                            <td className="py-1 text-right">{yen(p.liabilities ?? 0)}</td>
+                            <td className="py-1 text-right text-slate-200">{yen(p.net)}</td>
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </details>
+            </>
+          )}
         </div>
       </section>
 
